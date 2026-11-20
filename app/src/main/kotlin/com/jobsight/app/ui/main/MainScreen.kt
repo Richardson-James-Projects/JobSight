@@ -511,6 +511,8 @@ internal fun FieldCameraContent(
   var currentZoomRatio by remember { mutableFloatStateOf(1.0f) }
   var minZoomRatio by remember { mutableFloatStateOf(1.0f) }
   var maxZoomRatio by remember { mutableFloatStateOf(8.0f) }
+  var isTorchEnabled by remember { mutableStateOf(false) }
+  var hasFlashUnit by remember { mutableStateOf(true) }
 
   // Auto-dismiss notification banner after 30 seconds
   LaunchedEffect(uiState.statusBannerMessage) {
@@ -530,6 +532,8 @@ internal fun FieldCameraContent(
           currentZoomRatio = initZoom
           minZoomRatio = minZoom
           maxZoomRatio = maxZoom
+          hasFlashUnit = camera.cameraInfo.hasFlashUnit()
+          isTorchEnabled = false
         },
         onZoomRatioChanged = { newRatio -> currentZoomRatio = newRatio },
         modifier = Modifier.fillMaxSize(),
@@ -645,17 +649,51 @@ internal fun FieldCameraContent(
         Spacer(modifier = Modifier.height(14.dp))
       }
 
-      ShutterButton(
-        enabled = hasCameraPermission && !uiState.isUploadingPhoto,
-        isUploading = uiState.isUploadingPhoto,
-        onClick = {
-          capturePhotoToCache(
-            context = context,
-            imageCapture = imageCapture,
-            onCaptured = onPhotoCapturedToCache,
-          )
-        },
-      )
+      Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center,
+      ) {
+        ShutterButton(
+          enabled = hasCameraPermission && !uiState.isUploadingPhoto,
+          isUploading = uiState.isUploadingPhoto,
+          onClick = {
+            capturePhotoToCache(
+              context = context,
+              imageCapture = imageCapture,
+              onCaptured = onPhotoCapturedToCache,
+            )
+          },
+        )
+
+        if (hasCameraPermission && hasFlashUnit) {
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier =
+              Modifier.align(Alignment.CenterEnd)
+                .padding(end = 20.dp)
+                .size(56.dp)
+                .clip(CircleShape)
+                .border(
+                  width = 2.dp,
+                  color = if (isTorchEnabled) Color(0xFFFACC15) else Color(0xFF4B5563),
+                  shape = CircleShape,
+                )
+                .background(if (isTorchEnabled) Color(0xFFFACC15) else Color(0xCC111827))
+                .clickable {
+                  val nextTorch = !isTorchEnabled
+                  isTorchEnabled = nextTorch
+                  activeCamera?.cameraControl?.enableTorch(nextTorch)
+                },
+          ) {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_flashlight),
+              contentDescription = if (isTorchEnabled) "Turn Off Flashlight" else "Turn On Flashlight",
+              tint = if (isTorchEnabled) Color(0xFF0B0F14) else Color.White,
+              modifier = Modifier.size(26.dp),
+            )
+          }
+        }
+      }
       Spacer(modifier = Modifier.height(8.dp))
       val activeCustomer = uiState.activeCustomer
       val activeLocation = uiState.activeCustomerLocation
