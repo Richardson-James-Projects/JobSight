@@ -56,6 +56,7 @@ interface DataRepository {
   suspend fun getCustomers(): List<Customer>
   suspend fun createCustomer(name: String): Customer
   suspend fun deleteCustomer(customerId: Long)
+  suspend fun updateCustomerNotes(customerId: Long, notes: String)
   suspend fun addCustomerLocation(
     customerId: Long,
     label: String,
@@ -64,12 +65,14 @@ interface DataRepository {
     longitude: Double,
   ): CustomerLocation
   suspend fun deleteCustomerLocation(locationId: Long)
+  suspend fun updateCustomerLocationNotes(locationId: Long, notes: String)
 
   suspend fun geocodeAddress(addressQuery: String): ResolvedAddress
   suspend fun reverseGeocodeCoordinates(latitude: Double, longitude: Double): String?
 
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
   suspend fun updatePhotoNotes(photoId: Long, notes: String)
+  suspend fun updatePhotoPinned(photoId: Long, isPinned: Boolean)
   suspend fun deletePhotos(photos: List<CapturedPhotoRow>)
   suspend fun downloadImageBytes(imageUrl: String): ByteArray?
 
@@ -244,7 +247,7 @@ class DefaultDataRepository(
   override suspend fun getCustomers(): List<Customer> =
     withContext(Dispatchers.IO) {
       val selectCols =
-        "id,name,address,latitude,longitude,customer_locations(id,customer_id,label,address,latitude,longitude)"
+        "id,name,address,latitude,longitude,notes,customer_locations(id,customer_id,label,address,latitude,longitude,notes)"
       val request =
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customers?select=$selectCols&order=id.asc")
@@ -496,13 +499,15 @@ class DefaultDataRepository(
               imageUrl = "file://${queued.localFilePath}",
               capturedAt = "${queued.capturedAt} (Queued Offline)",
               aiAnalysisJson = null,
+              notes = "",
+              isPinned = false,
             )
           }
 
       val request =
         Request.Builder()
           .url(
-            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json,notes&order=captured_at.desc,id.desc"
+            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json,notes,is_pinned&order=is_pinned.desc,captured_at.desc,id.desc"
           )
           .header("apikey", apiKey)
           .header("Authorization", "Bearer ${authBearerToken()}")
@@ -516,7 +521,8 @@ class DefaultDataRepository(
             if (!response.isSuccessful) {
               throw IOException("Failed to fetch photos (${response.code}): $body")
             }
-            json.decodeFromString<List<CapturedPhotoRow>>(body).sortedByDescending { it.id }
+            json.decodeFromString<List<CapturedPhotoRow>>(body)
+              .sortedWith(compareByDescending<CapturedPhotoRow> { it.isPinned }.thenByDescending { it.id })
           }
         } catch (_: Exception) {
           emptyList()
@@ -545,6 +551,78 @@ class DefaultDataRepository(
         if (!response.isSuccessful) {
           val body = response.body?.string().orEmpty()
           throw IOException("Failed to update photo notes (${response.code}): $body")
+        }
+      }
+    }
+
+  override suspend fun updatePhotoPinned(photoId: Long, isPinned: Boolean) =
+    withContext(Dispatchers.IO) {
+      val payload =
+        buildJsonObject {
+          put("is_pinned", isPinned)
+        }.toString()
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/captured_photos?id=eq.$photoId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .patch(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to update photo pin (${response.code}): $body")
+        }
+      }
+    }
+
+  override suspend fun updateCustomerNotes(customerId: Long, notes: String) =
+    withContext(Dispatchers.IO) {
+      val payload =
+        buildJsonObject {
+          put("notes", notes.trim())
+        }.toString()
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/customers?id=eq.$customerId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .patch(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to update customer notes (${response.code}): $body")
+        }
+      }
+    }
+
+  override suspend fun updateCustomerLocationNotes(locationId: Long, notes: String) =
+    withContext(Dispatchers.IO) {
+      val payload =
+        buildJsonObject {
+          put("notes", notes.trim())
+        }.toString()
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/customer_locations?id=eq.$locationId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .patch(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to update location notes (${response.code}): $body")
         }
       }
     }

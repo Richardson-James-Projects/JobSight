@@ -118,6 +118,7 @@ import com.jobsight.app.R
 import com.jobsight.app.data.AnalysisJsonParser
 import com.jobsight.app.data.CapturedPhotoRow
 import com.jobsight.app.data.Customer
+import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.DefaultDataRepository
 import com.jobsight.app.data.HvacPartAnalysis
 import com.jobsight.app.data.SearchSite
@@ -241,6 +242,9 @@ fun MainScreen(
         onDeleteSearchSite = viewModel::deleteSearchSite,
         onDeletePhotos = viewModel::deletePhotosForCurrentCustomer,
         onUpdatePhotoNotes = viewModel::updatePhotoNotes,
+        onTogglePhotoPinned = viewModel::togglePhotoPinned,
+        onUpdateCustomerNotes = viewModel::updateCustomerNotes,
+        onUpdateCustomerLocationNotes = viewModel::updateCustomerLocationNotes,
         onSignOutCompany = viewModel::signOutCompany,
         onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
         onShowPartsForPhoto = viewModel::showPartsForPhoto,
@@ -502,6 +506,9 @@ internal fun FieldCameraContent(
   onDeleteSearchSite: (Long, String) -> Unit,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit = {},
   onUpdatePhotoNotes: (Long, String) -> Unit = { _, _ -> },
+  onTogglePhotoPinned: (Long, Boolean) -> Unit = { _, _ -> },
+  onUpdateCustomerNotes: (Long, String) -> Unit = { _, _ -> },
+  onUpdateCustomerLocationNotes: (Long, String) -> Unit = { _, _ -> },
   onSignOutCompany: () -> Unit = {},
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
@@ -759,6 +766,8 @@ internal fun FieldCameraContent(
         },
         onDeletePhotos = onDeletePhotos,
         onUpdatePhotoNotes = onUpdatePhotoNotes,
+        onTogglePhotoPinned = onTogglePhotoPinned,
+        onUpdateCustomerNotes = onUpdateCustomerNotes,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -781,6 +790,8 @@ internal fun FieldCameraContent(
         onDeleteCustomer = onDeleteCustomer,
         onAddLocationToCustomer = onAddLocationToCustomer,
         onDeleteLocationFromCustomer = onDeleteLocationFromCustomer,
+        onUpdateCustomerNotes = onUpdateCustomerNotes,
+        onUpdateCustomerLocationNotes = onUpdateCustomerLocationNotes,
         onAddSearchSite = onAddSearchSite,
         onDeleteSearchSite = onDeleteSearchSite,
         onSetGeofenceRadius = onSetGeofenceRadius,
@@ -1315,6 +1326,31 @@ private fun CustomerTagListDialog(
           verticalArrangement = Arrangement.spacedBy(8.dp),
           modifier = Modifier.fillMaxWidth(),
         ) {
+          if (activeStepCustomer.notes.isNotBlank()) {
+            item {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF1E293B),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                  Text("📋", style = MaterialTheme.typography.bodySmall)
+                  Text(
+                    text = activeStepCustomer.notes,
+                    color = Color(0xFFE2E8F0),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              }
+            }
+          }
+
           // "+ Add New Location" for this customer
           item {
             Surface(
@@ -1432,6 +1468,15 @@ private fun CustomerTagListDialog(
                       maxLines = 2,
                       overflow = TextOverflow.Ellipsis,
                     )
+                    if (loc.notes.isNotBlank()) {
+                      Text(
+                        text = "📍 ${loc.notes}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFDE68A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                      )
+                    }
                   }
                   Text(
                     text = if (isSelected) "Selected ✓" else "Select →",
@@ -1476,12 +1521,15 @@ private fun CustomerPhotosBottomSheet(
   onOpenSettingsClick: () -> Unit,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
   onUpdatePhotoNotes: (Long, String) -> Unit,
+  onTogglePhotoPinned: (Long, Boolean) -> Unit,
+  onUpdateCustomerNotes: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
 ) {
   val selectedCustomer = uiState.selectedHubCustomer
   var showPhotoCustomerPicker by remember { mutableStateOf(false) }
+  var customerPendingNoteEdit by remember { mutableStateOf<Customer?>(null) }
 
   Column(
     modifier =
@@ -1561,6 +1609,47 @@ private fun CustomerPhotosBottomSheet(
       }
     }
 
+    // Customer Notes Preview & Edit Bar
+    if (selectedCustomer != null) {
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (selectedCustomer.notes.isNotBlank()) Color(0xFF1E293B) else Color(0x660E2243),
+        modifier =
+          Modifier.fillMaxWidth()
+            .clickable { customerPendingNoteEdit = selectedCustomer },
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Row(
+            modifier = Modifier.weight(1f).padding(end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text(text = "📋", style = MaterialTheme.typography.bodySmall)
+            Text(
+              text = selectedCustomer.notes.ifBlank { "Add customer notes (gate codes, dog warnings, contacts)..." },
+              color = if (selectedCustomer.notes.isNotBlank()) Color.White else Color(0xFF94A3B8),
+              style = MaterialTheme.typography.bodySmall,
+              fontStyle =
+                if (selectedCustomer.notes.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic
+                else androidx.compose.ui.text.font.FontStyle.Normal,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+          Text(
+            text = if (selectedCustomer.notes.isNotBlank()) "Edit" else "+ Note",
+            color = Color(0xFF38BDF8),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+      }
+    }
+
     if (selectedCustomer != null) {
       CustomerPhotosSection(
         customer = selectedCustomer,
@@ -1569,11 +1658,27 @@ private fun CustomerPhotosBottomSheet(
         photoBitmapsCache = uiState.photoBitmapsCache,
         onDeletePhotos = onDeletePhotos,
         onUpdatePhotoNotes = onUpdatePhotoNotes,
+        onTogglePhotoPinned = onTogglePhotoPinned,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         modifier = Modifier.weight(1f),
       )
     }
+  }
+
+  if (customerPendingNoteEdit != null) {
+    val cust = customerPendingNoteEdit!!
+    EditGenericNoteDialog(
+      title = "Customer Notes",
+      subtitle = cust.name,
+      initialNote = cust.notes,
+      placeholder = "e.g. Gate code #1234, Dog in backyard, Call ahead 30 mins...",
+      onSave = { newNote ->
+        onUpdateCustomerNotes(cust.id, newNote)
+        customerPendingNoteEdit = null
+      },
+      onDismiss = { customerPendingNoteEdit = null },
+    )
   }
 
   // Popup list (like Search Sites) to pick which customer's photos to view
@@ -1716,6 +1821,8 @@ private fun AppSettingsBottomSheet(
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
   onAddAndSelectLocationForCustomer: (Long, String, Boolean, String) -> Unit = onAddLocationToCustomer,
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
+  onUpdateCustomerNotes: (Long, String) -> Unit,
+  onUpdateCustomerLocationNotes: (Long, String) -> Unit,
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
   onSetGeofenceRadius: (Float) -> Unit,
@@ -1727,6 +1834,8 @@ private fun AppSettingsBottomSheet(
   var customerForNewLocation by remember { mutableStateOf<Customer?>(null) }
   var customerPendingDeletion by remember { mutableStateOf<Customer?>(null) }
   var locationPendingDeletion by remember { mutableStateOf<Pair<Long, String>?>(null) }
+  var customerPendingNoteEdit by remember { mutableStateOf<Customer?>(null) }
+  var locationPendingNoteEdit by remember { mutableStateOf<Pair<CustomerLocation, String>?>(null) }
   var customerSearchQuery by remember { mutableStateOf("") }
   val context = LocalContext.current
 
@@ -1916,6 +2025,45 @@ private fun AppSettingsBottomSheet(
                   }
                 }
 
+                // Customer Notes Row
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (customer.notes.isNotBlank()) Color(0xFF1E293B) else Color(0x660E2243),
+                  modifier =
+                    Modifier.fillMaxWidth()
+                      .clickable { customerPendingNoteEdit = customer },
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                  ) {
+                    Row(
+                      modifier = Modifier.weight(1f).padding(end = 6.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                      Text("📋", style = MaterialTheme.typography.bodySmall)
+                      Text(
+                        text = customer.notes.ifBlank { "Add customer notes (gate codes, dog warnings, contacts)..." },
+                        color = if (customer.notes.isNotBlank()) Color.White else Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontStyle =
+                          if (customer.notes.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic
+                          else androidx.compose.ui.text.font.FontStyle.Normal,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                      )
+                    }
+                    Text(
+                      text = if (customer.notes.isNotBlank()) "Edit" else "+ Note",
+                      color = Color(0xFF38BDF8),
+                      style = MaterialTheme.typography.labelSmall,
+                      fontWeight = FontWeight.Bold,
+                    )
+                  }
+                }
+
                 // List each site location under this customer with a Directions button and an ✕ delete button
                 customer.locations.forEach { loc ->
                   Surface(
@@ -1923,69 +2071,103 @@ private fun AppSettingsBottomSheet(
                     color = Color(0xFF0E2243),
                     modifier = Modifier.fillMaxWidth(),
                   ) {
-                    Row(
+                    Column(
                       modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.SpaceBetween,
+                      verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                      ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                          Text(
+                            text = loc.label,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                          )
+                          Text(
+                            text = loc.address,
+                            color = Color(0xFF94A3B8),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                          )
+                        }
+                        Row(
+                          horizontalArrangement = Arrangement.spacedBy(6.dp),
+                          verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                          FilledTonalButton(
+                            onClick = {
+                              openMapsDirections(
+                                context = context,
+                                latitude = loc.latitude,
+                                longitude = loc.longitude,
+                                address = loc.address,
+                                label = "${customer.name} - ${loc.label}",
+                              )
+                            },
+                            colors =
+                              ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFF0F93E8),
+                                contentColor = Color.White,
+                              ),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(28.dp),
+                          ) {
+                            Icon(
+                              painter = painterResource(id = R.drawable.ic_directions),
+                              contentDescription = "Directions to ${loc.label}",
+                              tint = Color.White,
+                              modifier = Modifier.size(16.dp),
+                            )
+                          }
+                          Box(
+                            contentAlignment = Alignment.Center,
+                            modifier =
+                              Modifier.size(28.dp)
+                                .clip(CircleShape)
+                                .clickable { locationPendingDeletion = loc.id to loc.label },
+                          ) {
+                            Text(
+                              text = "✕",
+                              color = Color(0xFFF87171),
+                              style = MaterialTheme.typography.labelMedium,
+                              fontWeight = FontWeight.Bold,
+                            )
+                          }
+                        }
+                      }
+
+                      // Location Note Row
+                      Row(
+                        modifier =
+                          Modifier.fillMaxWidth()
+                            .clickable { locationPendingNoteEdit = loc to customer.name }
+                            .padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                      ) {
+                        Text("📍", style = MaterialTheme.typography.labelSmall)
                         Text(
-                          text = loc.label,
-                          fontWeight = FontWeight.SemiBold,
-                          color = Color.White,
-                          style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                          text = loc.address,
-                          color = Color(0xFF94A3B8),
+                          text = loc.notes.ifBlank { "+ Location note (gate code, filter size...)" },
+                          color = if (loc.notes.isNotBlank()) Color(0xFFE2E8F0) else Color(0xFF64748B),
                           style = MaterialTheme.typography.labelSmall,
+                          fontStyle =
+                            if (loc.notes.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic
+                            else androidx.compose.ui.text.font.FontStyle.Normal,
                           maxLines = 1,
                           overflow = TextOverflow.Ellipsis,
+                          modifier = Modifier.weight(1f),
                         )
-                      }
-                      Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                      ) {
-                        FilledTonalButton(
-                          onClick = {
-                            openMapsDirections(
-                              context = context,
-                              latitude = loc.latitude,
-                              longitude = loc.longitude,
-                              address = loc.address,
-                              label = "${customer.name} - ${loc.label}",
-                            )
-                          },
-                          colors =
-                            ButtonDefaults.filledTonalButtonColors(
-                              containerColor = Color(0xFF0F93E8),
-                              contentColor = Color.White,
-                            ),
-                          contentPadding = PaddingValues(0.dp),
-                          modifier = Modifier.size(28.dp),
-                        ) {
-                          Icon(
-                            painter = painterResource(id = R.drawable.ic_directions),
-                            contentDescription = "Directions to ${loc.label}",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp),
-                          )
-                        }
-                        Box(
-                          contentAlignment = Alignment.Center,
-                          modifier =
-                            Modifier.size(28.dp)
-                              .clip(CircleShape)
-                              .clickable { locationPendingDeletion = loc.id to loc.label },
-                        ) {
-                          Text(
-                            text = "✕",
-                            color = Color(0xFFF87171),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                          )
-                        }
+                        Text(
+                          text = if (loc.notes.isNotBlank()) "Edit" else "+ Note",
+                          color = Color(0xFF38BDF8),
+                          style = MaterialTheme.typography.labelSmall,
+                          fontWeight = FontWeight.Bold,
+                        )
                       }
                     }
                   }
@@ -2273,6 +2455,34 @@ private fun AppSettingsBottomSheet(
       },
     )
   }
+
+  customerPendingNoteEdit?.let { targetCustomer ->
+    EditGenericNoteDialog(
+      title = "Customer Notes",
+      subtitle = targetCustomer.name,
+      initialNote = targetCustomer.notes,
+      placeholder = "e.g. Gate code #1234, Dog in backyard, Call ahead 30 mins...",
+      onSave = { newNote ->
+        onUpdateCustomerNotes(targetCustomer.id, newNote)
+        customerPendingNoteEdit = null
+      },
+      onDismiss = { customerPendingNoteEdit = null },
+    )
+  }
+
+  locationPendingNoteEdit?.let { (targetLoc, custName) ->
+    EditGenericNoteDialog(
+      title = "Site Location Notes",
+      subtitle = "$custName • ${targetLoc.label}",
+      initialNote = targetLoc.notes,
+      placeholder = "e.g. Filter size 16x25x1, Rooftop ladder access on east wall, Key code 5678...",
+      onSave = { newNote ->
+        onUpdateCustomerLocationNotes(targetLoc.id, newNote)
+        locationPendingNoteEdit = null
+      },
+      onDismiss = { locationPendingNoteEdit = null },
+    )
+  }
 }
 
 @Composable
@@ -2283,6 +2493,7 @@ private fun CustomerPhotosSection(
   photoBitmapsCache: Map<String, ByteArray>,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
   onUpdatePhotoNotes: (Long, String) -> Unit,
+  onTogglePhotoPinned: (Long, Boolean) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   modifier: Modifier = Modifier,
@@ -2306,7 +2517,12 @@ private fun CustomerPhotosSection(
     return
   }
 
-  val sortedPhotos = remember(photos) { photos.sortedByDescending { it.id } }
+  val sortedPhotos =
+    remember(photos) {
+      photos.sortedWith(
+        compareByDescending<CapturedPhotoRow> { it.isPinned }.thenByDescending { it.id }
+      )
+    }
   var isSelectionMode by remember(customer.id) { mutableStateOf(false) }
   var selectedPhotoIds by remember(customer.id, sortedPhotos.size) { mutableStateOf(emptySet<Long>()) }
   var photosPendingDeleteConfirmation by remember { mutableStateOf<List<CapturedPhotoRow>?>(null) }
@@ -2619,6 +2835,23 @@ private fun CustomerPhotosSection(
                   )
                 }
 
+                // Pinned Photo Badge (Top-Start)
+                if (photo.isPinned) {
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFF59E0B),
+                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                  ) {
+                    Text(
+                      text = "📌 Pinned",
+                      color = Color.Black,
+                      fontWeight = FontWeight.Bold,
+                      style = MaterialTheme.typography.labelSmall,
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                  }
+                }
+
                 // Tap to view full screen badge
                 if (!isSelectionMode) {
                   Surface(
@@ -2742,41 +2975,63 @@ private fun CustomerPhotosSection(
                   )
                 }
 
-                if (parts.isNotEmpty()) {
-                  Button(
-                    onClick = { onShowPartsForPhoto(photo) },
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  FilledTonalButton(
+                    onClick = { onTogglePhotoPinned(photo.id, photo.isPinned) },
                     colors =
-                      ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF0F93E8),
-                        contentColor = Color.White,
+                      ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (photo.isPinned) Color(0xFFF59E0B) else Color(0xFF1E293B),
+                        contentColor = if (photo.isPinned) Color.Black else Color.White,
                       ),
-                  ) {
-                    Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
-                  }
-                } else if (photo.imageUrl.startsWith("file://")) {
-                  Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF1A3A6E),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp),
                   ) {
                     Text(
-                      text = "Queued Offline",
-                      color = Color(0xFF56B7F7),
+                      text = if (photo.isPinned) "📌 Pinned" else "📌 Pin",
                       style = MaterialTheme.typography.labelSmall,
                       fontWeight = FontWeight.Bold,
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                   }
-                } else {
-                  Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF334155),
-                  ) {
-                    Text(
-                      text = "Pending AI ID",
-                      color = Color(0xFFCBD5E1),
-                      style = MaterialTheme.typography.labelSmall,
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
+
+                  if (parts.isNotEmpty()) {
+                    Button(
+                      onClick = { onShowPartsForPhoto(photo) },
+                      colors =
+                        ButtonDefaults.buttonColors(
+                          containerColor = Color(0xFF0F93E8),
+                          contentColor = Color.White,
+                        ),
+                    ) {
+                      Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+                    }
+                  } else if (photo.imageUrl.startsWith("file://")) {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = Color(0xFF1A3A6E),
+                    ) {
+                      Text(
+                        text = "Queued Offline",
+                        color = Color(0xFF56B7F7),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      )
+                    }
+                  } else {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = Color(0xFF334155),
+                    ) {
+                      Text(
+                        text = "Pending AI ID",
+                        color = Color(0xFFCBD5E1),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                      )
+                    }
                   }
                 }
               }
@@ -2798,6 +3053,7 @@ private fun CustomerPhotosSection(
         onShowPartsForPhoto(photo)
       },
       onUpdatePhotoNotes = onUpdatePhotoNotes,
+      onTogglePhotoPinned = onTogglePhotoPinned,
       onDismiss = { photoPendingViewer = null },
     )
   }
@@ -2887,9 +3143,11 @@ private fun FullScreenPhotoViewerDialog(
   bitmapBytes: ByteArray?,
   onShowParts: () -> Unit,
   onUpdatePhotoNotes: (Long, String) -> Unit,
+  onTogglePhotoPinned: ((Long, Boolean) -> Unit)? = null,
   onDismiss: () -> Unit,
 ) {
   var currentNote by remember(photo.id, photo.notes) { mutableStateOf(photo.notes) }
+  var currentPinned by remember(photo.id, photo.isPinned) { mutableStateOf(photo.isPinned) }
   var showNoteDialog by remember { mutableStateOf(false) }
 
   val imageBitmap =
@@ -3016,25 +3274,49 @@ private fun FullScreenPhotoViewerDialog(
               )
             }
 
-            if (parts.isNotEmpty()) {
-              Button(
-                onClick = onShowParts,
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              FilledTonalButton(
+                onClick = {
+                  val nextPinned = !currentPinned
+                  currentPinned = nextPinned
+                  onTogglePhotoPinned?.invoke(photo.id, !nextPinned)
+                },
                 colors =
-                  ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF0F93E8),
-                    contentColor = Color.White,
+                  ButtonDefaults.filledTonalButtonColors(
+                    containerColor = if (currentPinned) Color(0xFFF59E0B) else Color(0xFF1E293B),
+                    contentColor = if (currentPinned) Color.Black else Color.White,
                   ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 modifier = Modifier.height(34.dp),
               ) {
                 Text(
-                  "${parts.size} Part(s)",
+                  text = if (currentPinned) "📌 Pinned" else "📌 Pin",
                   style = MaterialTheme.typography.labelSmall,
                   fontWeight = FontWeight.Bold,
                 )
               }
-            } else {
-              Spacer(modifier = Modifier.width(54.dp))
+
+              if (parts.isNotEmpty()) {
+                Button(
+                  onClick = onShowParts,
+                  colors =
+                    ButtonDefaults.buttonColors(
+                      containerColor = Color(0xFF0F93E8),
+                      contentColor = Color.White,
+                    ),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                  modifier = Modifier.height(34.dp),
+                ) {
+                  Text(
+                    "${parts.size} Part(s)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
             }
           }
         }
@@ -3166,6 +3448,66 @@ private fun EditPhotoNoteDialog(
           placeholder = { Text("e.g. Unit #2 compressor bad, replaced 45/5 cap...") },
           minLines = 3,
           maxLines = 5,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = { onSave(noteText) },
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("Save Note", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel", color = Color(0xFF94A3B8))
+      }
+    },
+  )
+}
+
+@Composable
+private fun EditGenericNoteDialog(
+  title: String,
+  subtitle: String? = null,
+  initialNote: String,
+  placeholder: String = "Enter notes...",
+  onSave: (String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var noteText by remember { mutableStateOf(initialNote) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = {
+      Column {
+        Text(title, fontWeight = FontWeight.Bold)
+        if (!subtitle.isNullOrBlank()) {
+          Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF38BDF8),
+          )
+        }
+      }
+    },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+          value = noteText,
+          onValueChange = { noteText = it },
+          placeholder = { Text(placeholder) },
+          minLines = 3,
+          maxLines = 6,
           modifier = Modifier.fillMaxWidth(),
         )
       }

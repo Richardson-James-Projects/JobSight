@@ -948,6 +948,77 @@ class MainScreenViewModel(
     }
   }
 
+  fun togglePhotoPinned(photoId: Long, currentPinned: Boolean) {
+    val newPinned = !currentPinned
+    viewModelScope.launch {
+      _uiState.update { state ->
+        val updated =
+          state.customerPhotos.map {
+            if (it.id == photoId) it.copy(isPinned = newPinned) else it
+          }.sortedWith(compareByDescending<CapturedPhotoRow> { it.isPinned }.thenByDescending { it.id })
+        state.copy(customerPhotos = updated)
+      }
+      try {
+        dataRepository.updatePhotoPinned(photoId, newPinned)
+      } catch (e: Exception) {
+        _uiState.update { state ->
+          val reverted =
+            state.customerPhotos.map {
+              if (it.id == photoId) it.copy(isPinned = currentPinned) else it
+            }.sortedWith(compareByDescending<CapturedPhotoRow> { it.isPinned }.thenByDescending { it.id })
+          state.copy(
+            customerPhotos = reverted,
+            errorMessage = "Could not update photo pin: ${e.message}",
+          )
+        }
+      }
+    }
+  }
+
+  fun updateCustomerNotes(customerId: Long, notes: String) {
+    viewModelScope.launch {
+      val cleanNotes = notes.trim()
+      _uiState.update { state ->
+        val updatedCustomers =
+          state.customers.map {
+            if (it.id == customerId) it.copy(notes = cleanNotes) else it
+          }
+        state.copy(customers = updatedCustomers)
+      }
+      try {
+        dataRepository.updateCustomerNotes(customerId, cleanNotes)
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not save customer notes: ${e.message}")
+        }
+      }
+    }
+  }
+
+  fun updateCustomerLocationNotes(locationId: Long, notes: String) {
+    viewModelScope.launch {
+      val cleanNotes = notes.trim()
+      _uiState.update { state ->
+        val updatedCustomers =
+          state.customers.map { cust ->
+            val updatedLocs =
+              cust.locations.map { loc ->
+                if (loc.id == locationId) loc.copy(notes = cleanNotes) else loc
+              }
+            cust.copy(locations = updatedLocs)
+          }
+        state.copy(customers = updatedCustomers)
+      }
+      try {
+        dataRepository.updateCustomerLocationNotes(locationId, cleanNotes)
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not save location notes: ${e.message}")
+        }
+      }
+    }
+  }
+
   fun clearStatusBanner() {
     _uiState.update { it.copy(statusBannerMessage = null, isAwaitingAiAnalysis = false) }
   }

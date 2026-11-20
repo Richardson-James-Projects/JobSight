@@ -17,6 +17,7 @@ data class CustomerLocation(
   val address: String,
   val latitude: Double,
   val longitude: Double,
+  val notes: String = "",
 )
 
 @Serializable
@@ -26,6 +27,7 @@ data class Customer(
   val address: String = "",
   val latitude: Double = 0.0,
   val longitude: Double = 0.0,
+  val notes: String = "",
   @SerialName("customer_locations") val locations: List<CustomerLocation> = emptyList(),
 )
 
@@ -35,6 +37,7 @@ data class CreateCustomerRequest(
   val address: String = "",
   val latitude: Double = 0.0,
   val longitude: Double = 0.0,
+  val notes: String = "",
 )
 
 @Serializable
@@ -44,6 +47,7 @@ data class CreateCustomerLocationRequest(
   val address: String,
   val latitude: Double,
   val longitude: Double,
+  val notes: String = "",
 )
 
 @Serializable
@@ -62,6 +66,7 @@ data class CapturedPhotoRow(
   @SerialName("captured_at") val capturedAt: String? = null,
   @SerialName("ai_analysis_json") val aiAnalysisJson: JsonElement? = null,
   val notes: String = "",
+  @SerialName("is_pinned") val isPinned: Boolean = false,
 )
 
 @Serializable
