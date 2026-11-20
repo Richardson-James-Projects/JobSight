@@ -21,10 +21,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -56,7 +55,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -179,6 +177,9 @@ fun MainScreen(
     onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
     onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
     onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
+    onOpenSettingsSheet = viewModel::openSettingsSheet,
+    onCloseSettingsSheet = viewModel::closeSettingsSheet,
+    onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
     onAddSearchSite = viewModel::addSearchSite,
     onDeleteSearchSite = viewModel::deleteSearchSite,
     onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
@@ -210,6 +211,9 @@ internal fun FieldCameraContent(
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
   onOpenSearchSitesSettings: () -> Unit,
   onCloseSearchSitesSettings: () -> Unit,
+  onOpenSettingsSheet: () -> Unit = onOpenSearchSitesSettings,
+  onCloseSettingsSheet: () -> Unit = onCloseSearchSitesSettings,
+  onSetGeofenceRadius: (Float) -> Unit = {},
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
@@ -225,7 +229,6 @@ internal fun FieldCameraContent(
       .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
       .build()
   }
-  var showDirectAddCustomerDialog by remember { mutableStateOf(false) }
 
   Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0F14))) {
     // 1. Full-screen distortion-free CameraX PreviewView
@@ -255,8 +258,8 @@ internal fun FieldCameraContent(
         uiState = uiState,
         hasLocationPermission = hasLocationPermission,
         onOpenCustomerPicker = onOpenCustomerPicker,
-        onAddCustomerClick = { showDirectAddCustomerDialog = true },
-        onOpenCustomerHub = { onOpenCustomerHub(uiState.activeCustomer?.id) },
+        onOpenPhotosClick = { onOpenCustomerHub(uiState.activeCustomer?.id) },
+        onOpenSettingsClick = onOpenSettingsSheet,
         onResetToAutoGps = { onSelectCustomerManually(null, null) },
       )
 
@@ -337,7 +340,7 @@ internal fun FieldCameraContent(
       }
     }
 
-    // 3. Bottom Zero-Click Shutter Bar (shows Customer + Site Location being tagged)
+    // 3. Bottom Zero-Click Shutter Bar
     Column(
       modifier =
         Modifier.align(Alignment.BottomCenter)
@@ -377,52 +380,35 @@ internal fun FieldCameraContent(
     }
   }
 
-  if (showDirectAddCustomerDialog) {
-    AddCustomerDialog(
-      hasCurrentGps = uiState.currentLocation != null,
-      isSaving = uiState.isSavingCustomerOrLocation,
-      onConfirm = { name, locLabel, useGps, address ->
-        showDirectAddCustomerDialog = false
-        onCreateCustomer(name, locLabel, useGps, address)
-      },
-      onDismiss = { showDirectAddCustomerDialog = false },
-    )
-  }
-
-  // 4. Customer & Location Switcher Modal (Auto-Detect vs Manual Customer + Location Override)
+  // 4. Clean Customer Selector Popup (styled just like the Search Sites list!)
   if (uiState.isCustomerPickerVisible) {
-    CustomerPickerDialog(
+    CustomerTagListDialog(
       uiState = uiState,
       onSelectCustomerAndLocation = onSelectCustomerManually,
-      onManageCustomersClick = {
+      onOpenSettingsClick = {
         onCloseCustomerPicker()
-        onOpenCustomerHub(uiState.activeCustomer?.id)
+        onOpenSettingsSheet()
       },
       onDismiss = onCloseCustomerPicker,
     )
   }
 
-  // 5. Full Customer Hub Sheet (Add Customers, Add Locations by Address/GPS, View Customer Photos)
+  // 5. Clean Customer Photos Gallery Sheet (no settings clutter!)
   if (uiState.isCustomerHubVisible) {
-    val hubSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val photosSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
       onDismissRequest = onCloseCustomerHub,
-      sheetState = hubSheetState,
+      sheetState = photosSheetState,
       containerColor = Color(0xFF0F172A),
       contentColor = Color.White,
     ) {
-      CustomerHubBottomSheet(
+      CustomerPhotosBottomSheet(
         uiState = uiState,
         onSelectHubCustomer = onSelectHubCustomer,
-        onSetAsActiveCustomerAndLocation = { customerId, locationId ->
-          onSelectCustomerManually(customerId, locationId)
+        onOpenSettingsClick = {
           onCloseCustomerHub()
+          onOpenSettingsSheet()
         },
-        onCreateCustomer = onCreateCustomer,
-        onDeleteCustomer = onDeleteCustomer,
-        onAddLocationToCustomer = onAddLocationToCustomer,
-        onDeleteLocationFromCustomer = onDeleteLocationFromCustomer,
-        onOpenSearchSitesSettings = onOpenSearchSitesSettings,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -430,7 +416,31 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 6. AI Part Identification Bottom Sheet Card
+  // 6. Dedicated Settings Sheet (Gear ⚙️: Add/Remove Customers, Locations, Search Sites, Geofence Radius)
+  if (uiState.isSettingsSheetVisible) {
+    val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+      onDismissRequest = onCloseSettingsSheet,
+      sheetState = settingsSheetState,
+      containerColor = Color(0xFF0F172A),
+      contentColor = Color.White,
+    ) {
+      AppSettingsBottomSheet(
+        uiState = uiState,
+        initialTab = if (uiState.isSearchSitesSettingsVisible) 1 else 0,
+        onCreateCustomer = onCreateCustomer,
+        onDeleteCustomer = onDeleteCustomer,
+        onAddLocationToCustomer = onAddLocationToCustomer,
+        onDeleteLocationFromCustomer = onDeleteLocationFromCustomer,
+        onAddSearchSite = onAddSearchSite,
+        onDeleteSearchSite = onDeleteSearchSite,
+        onSetGeofenceRadius = onSetGeofenceRadius,
+        onClose = onCloseSettingsSheet,
+      )
+    }
+  }
+
+  // 7. AI Part Identification Bottom Sheet Card
   if (uiState.isBottomSheetVisible && uiState.detectedParts.isNotEmpty()) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -444,7 +454,10 @@ internal fun FieldCameraContent(
         customerName = (uiState.activeCustomer?.name ?: "Job Site Capture") + locLabel,
         parts = uiState.detectedParts,
         searchSites = uiState.searchSites,
-        onOpenSearchSitesSettings = onOpenSearchSitesSettings,
+        onOpenSearchSitesSettings = {
+          onDismissBottomSheet()
+          onOpenSearchSitesSettings()
+        },
         onSearchPartOnSite = { site, query ->
           val fullUrl = site.buildSearchUrl(Uri.encode(query))
           val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
@@ -454,16 +467,6 @@ internal fun FieldCameraContent(
       )
     }
   }
-
-  // 7. Search Sites Settings Dialog
-  if (uiState.isSearchSitesSettingsVisible) {
-    SearchSitesSettingsDialog(
-      searchSites = uiState.searchSites,
-      onAddSite = onAddSearchSite,
-      onDeleteSite = onDeleteSearchSite,
-      onDismiss = onCloseSearchSitesSettings,
-    )
-  }
 }
 
 @Composable
@@ -471,8 +474,8 @@ private fun GeofenceHeaderBadge(
   uiState: FieldCameraUiState,
   hasLocationPermission: Boolean,
   onOpenCustomerPicker: () -> Unit,
-  onAddCustomerClick: () -> Unit,
-  onOpenCustomerHub: () -> Unit,
+  onOpenPhotosClick: () -> Unit,
+  onOpenSettingsClick: () -> Unit,
   onResetToAutoGps: () -> Unit,
 ) {
   val manualCustomer = uiState.manualSelectedCustomer
@@ -502,7 +505,7 @@ private fun GeofenceHeaderBadge(
   ) {
     Column(
       modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       Row(
         verticalAlignment = Alignment.Top,
@@ -513,7 +516,7 @@ private fun GeofenceHeaderBadge(
           Text(
             text =
               when {
-                manualCustomer != null -> "Selected: ${manualCustomer.name} (Manual)"
+                manualCustomer != null -> "Selected: ${manualCustomer.name}"
                 autoDetected != null -> "Detected: ${autoDetected.name}"
                 !hasLocationPermission -> "Location Permission Required"
                 uiState.currentLocation == null -> "Acquiring GPS Location..."
@@ -528,7 +531,7 @@ private fun GeofenceHeaderBadge(
               manualCustomer != null -> {
                 val locLabel = manualLocation?.label ?: "Primary Site"
                 val locAddr = manualLocation?.address ?: manualCustomer.address
-                "Location: $locLabel • $locAddr"
+                "Manual tag • $locLabel ($locAddr)"
               }
               autoDetected != null -> {
                 val matchedLoc = uiState.autoDetectedLocation
@@ -552,85 +555,88 @@ private fun GeofenceHeaderBadge(
           }
         }
 
-        if (manualCustomer != null) {
-          Spacer(modifier = Modifier.width(8.dp))
-          OutlinedButton(
-            onClick = onResetToAutoGps,
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (manualCustomer != null) {
+            OutlinedButton(
+              onClick = onResetToAutoGps,
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF93C5FD)),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+              modifier = Modifier.height(34.dp),
+            ) {
+              Text("Auto GPS", style = MaterialTheme.typography.labelSmall)
+            }
+          }
+
+          // Gear Button for all Settings (Customers, Locations, Search Sites, Geofence Radius)
+          FilledTonalButton(
+            onClick = onOpenSettingsClick,
             colors =
-              ButtonDefaults.outlinedButtonColors(
-                contentColor = Color(0xFF93C5FD)
+              ButtonDefaults.filledTonalButtonColors(
+                containerColor = Color(0xFF1E293B),
+                contentColor = Color.White,
               ),
-            modifier = Modifier.height(32.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            modifier = Modifier.height(34.dp),
           ) {
-            Text("Use Auto GPS", style = MaterialTheme.typography.labelSmall)
+            Text("⚙ Settings", style = MaterialTheme.typography.labelSmall)
           }
         }
       }
 
-      // Row 1: Select Customer | Add Customer
+      // Clean 2-button bar: Select Customer (like Search Sites list) | View Photos
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        FilledTonalButton(
+        Button(
           onClick = onOpenCustomerPicker,
           colors =
-            ButtonDefaults.filledTonalButtonColors(
+            ButtonDefaults.buttonColors(
               containerColor = Color(0xFF1E293B),
               contentColor = Color.White,
             ),
-          modifier = Modifier.weight(1f).height(36.dp),
+          modifier = Modifier.weight(1f).height(38.dp),
         ) {
           Text(
             text = "Select Customer",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
           )
         }
 
         Button(
-          onClick = onAddCustomerClick,
+          onClick = onOpenPhotosClick,
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = Color(0xFF10B981),
+              containerColor = Color(0xFF0284C7),
               contentColor = Color.White,
             ),
-          modifier = Modifier.weight(1f).height(36.dp),
+          modifier = Modifier.weight(1f).height(38.dp),
         ) {
           Text(
-            text = "Add Customer",
-            style = MaterialTheme.typography.labelSmall,
+            text = "View Photos",
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
           )
         }
-      }
-
-      // Row 2: Customers & Photos
-      Button(
-        onClick = onOpenCustomerHub,
-        colors =
-          ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF0284C7),
-            contentColor = Color.White,
-          ),
-        modifier = Modifier.fillMaxWidth().height(36.dp),
-      ) {
-        Text(
-          text = "Customers & Photos",
-          style = MaterialTheme.typography.labelSmall,
-          maxLines = 1,
-        )
       }
     }
   }
 }
 
+/**
+ * Clean vertical popup list (styled just like the "Choose Site to Search" dialog!)
+ * to select a Customer (& Site Location) for the camera photo tag.
+ */
 @Composable
-private fun CustomerPickerDialog(
+private fun CustomerTagListDialog(
   uiState: FieldCameraUiState,
   onSelectCustomerAndLocation: (Long?, Long?) -> Unit,
-  onManageCustomersClick: () -> Unit,
+  onOpenSettingsClick: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   AlertDialog(
@@ -638,19 +644,30 @@ private fun CustomerPickerDialog(
     containerColor = Color(0xFF1E293B),
     titleContentColor = Color.White,
     textContentColor = Color.White,
-    title = { Text("Select Customer & Site Location", fontWeight = FontWeight.Bold) },
+    title = {
+      Column {
+        Text("Select Customer for Photo Tag", fontWeight = FontWeight.Bold)
+        Text(
+          text = "Tap a customer site below to tag your photos",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFF94A3B8),
+        )
+      }
+    },
     text = {
       LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
+        // 1. Auto-Detect via GPS option
         item {
           val isAutoMode = uiState.manualCustomerOverrideId == null
           val autoDetectedName =
             uiState.autoDetectedCustomer?.let { cust ->
-              val locName = uiState.autoDetectedLocation?.label?.let { " ($it)" }.orEmpty()
+              val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
               "${cust.name}$locName"
-            } ?: "None within 100m"
+            } ?: "No customer within ${uiState.geofenceRadiusMeters.toInt()}m"
+
           Surface(
             shape = RoundedCornerShape(10.dp),
             color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
@@ -659,123 +676,121 @@ private fun CustomerPickerDialog(
                 .clickable { onSelectCustomerAndLocation(null, null) },
           ) {
             Row(
-              modifier = Modifier.padding(12.dp),
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
               verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-              RadioButton(
-                selected = isAutoMode,
-                onClick = { onSelectCustomerAndLocation(null, null) },
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Column {
+              Column(modifier = Modifier.weight(1f)) {
                 Text(
-                  text = "Auto-Detect via GPS (< 100m)",
-                  fontWeight = FontWeight.SemiBold,
+                  text = "Auto-Detect via GPS",
+                  fontWeight = FontWeight.Bold,
                   color = Color.White,
                 )
                 Text(
-                  text = "Currently detected: $autoDetectedName",
-                  style = MaterialTheme.typography.bodySmall,
+                  text = autoDetectedName,
+                  style = MaterialTheme.typography.labelSmall,
                   color = Color(0xFFD1D5DB),
                 )
               }
+              Text(
+                text = if (isAutoMode) "Active ✓" else "Use →",
+                color = Color(0xFF34D399),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+              )
             }
           }
         }
 
-        item {
-          HorizontalDivider(color = Color(0xFF334155), modifier = Modifier.padding(vertical = 4.dp))
-          Text(
-            text = "Or Select Customer & Site Location Manually:",
-            style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF94A3B8),
-          )
-        }
-
-        items(uiState.customers) { customer ->
-          Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = Color(0xFF0F172A),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Column(
-              modifier = Modifier.padding(12.dp),
-              verticalArrangement = Arrangement.spacedBy(6.dp),
+        // 2. Flat, clean list of Customers & their Site Locations (just like the Search Site picker)
+        items(uiState.customers, key = { it.id }) { customer ->
+          if (customer.locations.isEmpty()) {
+            val isSelected = uiState.manualCustomerOverrideId == customer.id
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable { onSelectCustomerAndLocation(customer.id, null) },
             ) {
-              Text(
-                text = customer.name,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                style = MaterialTheme.typography.titleSmall,
-              )
-
-              if (customer.locations.isEmpty()) {
-                val isSelected = uiState.manualCustomerOverrideId == customer.id
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier =
-                    Modifier.fillMaxWidth()
-                      .clip(RoundedCornerShape(8.dp))
-                      .background(if (isSelected) Color(0xFF1E3A8A) else Color(0xFF1E293B))
-                      .clickable { onSelectCustomerAndLocation(customer.id, null) }
-                      .padding(8.dp),
-                ) {
-                  RadioButton(
-                    selected = isSelected,
-                    onClick = { onSelectCustomerAndLocation(customer.id, null) },
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = customer.name,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
                   )
                   Text(
-                    text = "Default Site",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = customer.address.ifBlank { "Default Site" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF94A3B8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                   )
                 }
-              } else {
-                customer.locations.forEach { loc ->
-                  val isLocSelected =
-                    uiState.manualCustomerOverrideId == customer.id &&
-                      (uiState.manualLocationOverrideId == loc.id ||
-                        (uiState.manualLocationOverrideId == null &&
-                          customer.locations.first().id == loc.id))
-                  val distMeters =
-                    uiState.currentLocation?.let { deviceLoc ->
-                      LocationTracker.distanceBetween(deviceLoc, loc.latitude, loc.longitude)
-                    }
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier =
-                      Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isLocSelected) Color(0xFF1E3A8A) else Color(0xFF1E293B))
-                        .clickable { onSelectCustomerAndLocation(customer.id, loc.id) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                  ) {
-                    RadioButton(
-                      selected = isLocSelected,
-                      onClick = { onSelectCustomerAndLocation(customer.id, loc.id) },
+                Text(
+                  text = if (isSelected) "Selected ✓" else "Select →",
+                  color = Color(0xFF38BDF8),
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                )
+              }
+            }
+          } else {
+            customer.locations.forEach { loc ->
+              val isSelected =
+                uiState.manualCustomerOverrideId == customer.id &&
+                  (uiState.manualLocationOverrideId == loc.id ||
+                    (uiState.manualLocationOverrideId == null &&
+                      customer.locations.first().id == loc.id))
+              val distMeters =
+                uiState.currentLocation?.let { deviceLoc ->
+                  LocationTracker.distanceBetween(deviceLoc, loc.latitude, loc.longitude)
+                }
+
+              Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .clickable { onSelectCustomerAndLocation(customer.id, loc.id) },
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                      text = customer.name,
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                      Text(
-                        text =
-                          buildString {
-                            append(loc.label)
-                            if (distMeters != null) {
-                              append(" (${distMeters.roundToInt()}m)")
-                            }
-                          },
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.bodySmall,
-                      )
-                      Text(
-                        text = loc.address,
-                        color = Color(0xFF94A3B8),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                      )
-                    }
+                    Text(
+                      text =
+                        buildString {
+                          append("${loc.label} • ${loc.address}")
+                          if (distMeters != null) {
+                            append(" (${distMeters.roundToInt()}m)")
+                          }
+                        },
+                      style = MaterialTheme.typography.labelSmall,
+                      color = Color(0xFF38BDF8),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
                   }
+                  Text(
+                    text = if (isSelected) "Selected ✓" else "Select →",
+                    color = Color(0xFF34D399),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
                 }
               }
             }
@@ -784,39 +799,211 @@ private fun CustomerPickerDialog(
       }
     },
     confirmButton = {
-      TextButton(onClick = onManageCustomersClick) {
-        Text("+ Add Customer / View Photos", color = Color(0xFF38BDF8))
+      TextButton(onClick = onOpenSettingsClick) {
+        Text("⚙ Manage Customers in Settings", color = Color(0xFF38BDF8))
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Close", color = Color(0xFF94A3B8))
+        Text("Cancel", color = Color(0xFF94A3B8))
       }
     },
   )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Clean Customer Photos Bottom Sheet — dedicated purely to viewing photos by customer,
+ * with a clean popup list button to switch which customer you're viewing and a Gear button for Settings.
+ */
 @Composable
-private fun CustomerHubBottomSheet(
+private fun CustomerPhotosBottomSheet(
   uiState: FieldCameraUiState,
   onSelectHubCustomer: (Long) -> Unit,
-  onSetAsActiveCustomerAndLocation: (Long, Long?) -> Unit,
-  onCreateCustomer: (String, String, Boolean, String) -> Unit,
-  onDeleteCustomer: (Long) -> Unit,
-  onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
-  onDeleteLocationFromCustomer: (Long, String) -> Unit,
-  onOpenSearchSitesSettings: () -> Unit,
+  onOpenSettingsClick: () -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
 ) {
   val selectedCustomer = uiState.selectedHubCustomer
-  var selectedTabIndex by remember { mutableIntStateOf(0) } // 0 = Photos, 1 = Locations
+  var showPhotoCustomerPicker by remember { mutableStateOf(false) }
+
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .fillMaxHeight(0.86f)
+        .padding(horizontal = 16.dp)
+        .padding(bottom = 24.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    // Top Header: Title + Gear Settings button
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "Customer Photos",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+        )
+        Text(
+          text = "Inspect photos and AI part identifications by customer",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFF94A3B8),
+        )
+      }
+      FilledTonalButton(
+        onClick = onOpenSettingsClick,
+        colors =
+          ButtonDefaults.filledTonalButtonColors(
+            containerColor = Color(0xFF1E293B),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("⚙ Settings", style = MaterialTheme.typography.labelMedium)
+      }
+    }
+
+    // Clean Button to pull up the Customer List Popup (just like Search Sites!)
+    Surface(
+      shape = RoundedCornerShape(12.dp),
+      color = Color(0xFF1E293B),
+      modifier =
+        Modifier.fillMaxWidth()
+          .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(12.dp))
+          .clickable { showPhotoCustomerPicker = true },
+    ) {
+      Row(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "Viewing Customer",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF94A3B8),
+          )
+          Text(
+            text = selectedCustomer?.name ?: "Select a Customer",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+          )
+        }
+        Text(
+          text = "Change Customer ▾",
+          color = Color(0xFF38BDF8),
+          style = MaterialTheme.typography.labelMedium,
+          fontWeight = FontWeight.Bold,
+        )
+      }
+    }
+
+    if (selectedCustomer != null) {
+      CustomerPhotosSection(
+        customer = selectedCustomer,
+        photos = uiState.customerPhotos,
+        isLoading = uiState.isLoadingCustomerPhotos,
+        photoBitmapsCache = uiState.photoBitmapsCache,
+        onTriggerDemoAi = onTriggerDemoAi,
+        onShowPartsForPhoto = onShowPartsForPhoto,
+        modifier = Modifier.weight(1f),
+      )
+    }
+  }
+
+  // Popup list (like Search Sites) to pick which customer's photos to view
+  if (showPhotoCustomerPicker) {
+    AlertDialog(
+      onDismissRequest = { showPhotoCustomerPicker = false },
+      containerColor = Color(0xFF1E293B),
+      titleContentColor = Color.White,
+      textContentColor = Color.White,
+      title = { Text("Choose Customer to View Photos", fontWeight = FontWeight.Bold) },
+      text = {
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          items(uiState.customers, key = { it.id }) { customer ->
+            val isSelected = selectedCustomer?.id == customer.id
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable {
+                    showPhotoCustomerPicker = false
+                    onSelectHubCustomer(customer.id)
+                  },
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = customer.name,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                  Text(
+                    text = "${customer.locations.size} site location(s)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF94A3B8),
+                  )
+                }
+                Text(
+                  text = if (isSelected) "Viewing ✓" else "View →",
+                  color = Color(0xFF34D399),
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                )
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        TextButton(onClick = { showPhotoCustomerPicker = false }) {
+          Text("Close", color = Color(0xFF94A3B8))
+        }
+      },
+    )
+  }
+}
+
+/**
+ * Dedicated Settings Sheet (Gear ⚙️) for all configuration:
+ * - Tab 0: Customers & Site Locations (Add Customer, Remove Customer, Add/Remove Site Locations)
+ * - Tab 1: Search Sites (Add/Remove online part search websites)
+ * - Tab 2: Field Preferences (GPS Auto-Detect Geofence Radius)
+ */
+@Composable
+private fun AppSettingsBottomSheet(
+  uiState: FieldCameraUiState,
+  initialTab: Int = 0,
+  onCreateCustomer: (String, String, Boolean, String) -> Unit,
+  onDeleteCustomer: (Long) -> Unit,
+  onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onDeleteLocationFromCustomer: (Long, String) -> Unit,
+  onAddSearchSite: (String, String) -> Unit,
+  onDeleteSearchSite: (Long, String) -> Unit,
+  onSetGeofenceRadius: (Float) -> Unit,
+  onClose: () -> Unit,
+) {
+  var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
   var showNewCustomerDialog by remember { mutableStateOf(false) }
-  var showAddLocationDialog by remember { mutableStateOf(false) }
+  var customerForNewLocation by remember { mutableStateOf<Customer?>(null) }
   var customerPendingDeletion by remember { mutableStateOf<Customer?>(null) }
   var locationPendingDeletion by remember { mutableStateOf<Pair<Long, String>?>(null) }
+
+  var newSiteName by remember { mutableStateOf("") }
+  var newSiteUrl by remember { mutableStateOf("") }
 
   Column(
     modifier =
@@ -826,196 +1013,347 @@ private fun CustomerHubBottomSheet(
         .padding(bottom = 24.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    // Header Row
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+      Column(modifier = Modifier.weight(1f)) {
         Text(
-          text = "Customers, Locations & Photos",
+          text = "⚙ JobSight Settings",
           style = MaterialTheme.typography.titleLarge,
           fontWeight = FontWeight.Bold,
           color = Color.White,
         )
         Text(
-          text = "Add customers, manage site locations, or inspect captured photos",
+          text = "Manage customers, site locations, search websites & GPS radius",
           style = MaterialTheme.typography.bodySmall,
           color = Color(0xFF94A3B8),
         )
       }
-      Column(
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        Button(
-          onClick = { showNewCustomerDialog = true },
-          colors =
-            ButtonDefaults.buttonColors(
-              containerColor = Color(0xFF10B981),
-              contentColor = Color.White,
-            ),
-          modifier = Modifier.height(34.dp),
-        ) {
-          Text("+ New Customer", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        }
-        OutlinedButton(
-          onClick = onOpenSearchSitesSettings,
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-          modifier = Modifier.height(32.dp),
-        ) {
-          Text("Search Sites (${uiState.searchSites.size})", style = MaterialTheme.typography.labelSmall)
-        }
+      TextButton(onClick = onClose) {
+        Text("Done", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
       }
     }
 
-    // Horizontal Customer Selector Chips
-    Row(
-      modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    SecondaryTabRow(
+      selectedTabIndex = selectedTab,
+      containerColor = Color(0xFF1E293B),
+      contentColor = Color.White,
     ) {
-      uiState.customers.forEach { customer ->
-        val isSelected = selectedCustomer?.id == customer.id
-        FilterChip(
-          selected = isSelected,
-          onClick = { onSelectHubCustomer(customer.id) },
-          label = {
-            Text(
-              text = "${customer.name} (${customer.locations.size})",
-              color = if (isSelected) Color.White else Color(0xFFCBD5E1),
-            )
-          },
-          colors =
-            FilterChipDefaults.filterChipColors(
-              selectedContainerColor = Color(0xFF0284C7),
-              containerColor = Color(0xFF1E293B),
-            ),
-        )
-      }
+      Tab(
+        selected = selectedTab == 0,
+        onClick = { selectedTab = 0 },
+        text = { Text("Customers (${uiState.customers.size})") },
+      )
+      Tab(
+        selected = selectedTab == 1,
+        onClick = { selectedTab = 1 },
+        text = { Text("Search Sites (${uiState.searchSites.size})") },
+      )
+      Tab(
+        selected = selectedTab == 2,
+        onClick = { selectedTab = 2 },
+        text = { Text("GPS & App") },
+      )
     }
 
-    if (selectedCustomer != null) {
-      // Selected Customer Action Bar
-      Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF1E293B),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Column(
-          modifier = Modifier.padding(12.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
+    when (selectedTab) {
+      0 -> {
+        // Tab 0: Customers & Locations Management
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+          Text(
+            text = "Customers & Their Site Locations",
+            style = MaterialTheme.typography.titleSmall,
+            color = Color(0xFFCBD5E1),
+          )
+          Button(
+            onClick = { showNewCustomerDialog = true },
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF10B981),
+                contentColor = Color.White,
+              ),
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                text = selectedCustomer.name,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-              )
-              Text(
-                text =
-                  "${selectedCustomer.locations.size} location(s) • ${uiState.customerPhotos.size} photo(s) captured",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF94A3B8),
-              )
-            }
-            OutlinedButton(
-              onClick = { customerPendingDeletion = selectedCustomer },
-              colors =
-                ButtonDefaults.outlinedButtonColors(
-                  contentColor = Color(0xFFF87171),
-                ),
-              modifier = Modifier.height(32.dp),
+            Text("+ Add Customer", fontWeight = FontWeight.Bold)
+          }
+        }
+
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier.weight(1f),
+        ) {
+          items(uiState.customers, key = { it.id }) { customer ->
+            Card(
+              colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth(),
             ) {
-              Text("Remove Customer", style = MaterialTheme.typography.labelSmall)
+              Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      text = customer.name,
+                      style = MaterialTheme.typography.titleMedium,
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
+                    )
+                    Text(
+                      text = "${customer.locations.size} saved site location(s)",
+                      style = MaterialTheme.typography.bodySmall,
+                      color = Color(0xFF94A3B8),
+                    )
+                  }
+                  Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilledTonalButton(
+                      onClick = { customerForNewLocation = customer },
+                      colors =
+                        ButtonDefaults.filledTonalButtonColors(
+                          containerColor = Color(0xFF0284C7),
+                          contentColor = Color.White,
+                        ),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                      modifier = Modifier.height(32.dp),
+                    ) {
+                      Text("+ Location", style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(
+                      onClick = { customerPendingDeletion = customer },
+                      colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                      modifier = Modifier.height(32.dp),
+                    ) {
+                      Text("Remove", style = MaterialTheme.typography.labelSmall)
+                    }
+                  }
+                }
+
+                // List each site location under this customer with a Remove button
+                customer.locations.forEach { loc ->
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F172A),
+                    modifier = Modifier.fillMaxWidth(),
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                          text = loc.label,
+                          fontWeight = FontWeight.SemiBold,
+                          color = Color.White,
+                          style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                          text = loc.address,
+                          color = Color(0xFF94A3B8),
+                          style = MaterialTheme.typography.labelSmall,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                      }
+                      TextButton(
+                        onClick = { locationPendingDeletion = loc.id to loc.label },
+                      ) {
+                        Text(
+                          text = "Remove",
+                          color = Color(0xFFF87171),
+                          style = MaterialTheme.typography.labelSmall,
+                        )
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        }
+      }
+
+      1 -> {
+        // Tab 1: Search Sites Settings
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = Color(0xFF1E293B),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
+            Text(
+              text = "Add a Part Search Website",
+              style = MaterialTheme.typography.titleSmall,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF38BDF8),
+            )
+            OutlinedTextField(
+              value = newSiteName,
+              onValueChange = { newSiteName = it },
+              label = { Text("Website Name (e.g. Ferguson, Johnstone)") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+              value = newSiteUrl,
+              onValueChange = { newSiteUrl = it },
+              label = { Text("Domain or Search URL") },
+              placeholder = { Text("e.g. ferguson.com or https://.../search?q={query}") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
             Button(
-              onClick = { showAddLocationDialog = true },
-              colors =
-                ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF0284C7),
-                  contentColor = Color.White,
-                ),
-              modifier = Modifier.weight(1f),
-            ) {
-              Text("+ Add Site Location", style = MaterialTheme.typography.labelMedium)
-            }
-            OutlinedButton(
+              enabled = newSiteName.isNotBlank() && newSiteUrl.isNotBlank(),
               onClick = {
-                onSetAsActiveCustomerAndLocation(
-                  selectedCustomer.id,
-                  selectedCustomer.locations.firstOrNull()?.id,
-                )
+                onAddSearchSite(newSiteName, newSiteUrl)
+                newSiteName = ""
+                newSiteUrl = ""
               },
               colors =
-                ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-              modifier = Modifier.weight(1f),
+                ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF10B981),
+                  contentColor = Color.White,
+                ),
+              modifier = Modifier.fillMaxWidth(),
             ) {
-              Text("Tag Camera Here", style = MaterialTheme.typography.labelMedium)
+              Text("+ Add Search Site", fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.weight(1f),
+        ) {
+          items(uiState.searchSites, key = { it.id }) { site ->
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = Color(0xFF1E293B),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(
+                    text = site.name,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                  Text(
+                    text = site.urlTemplate,
+                    color = Color(0xFF94A3B8),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+                OutlinedButton(
+                  onClick = { onDeleteSearchSite(site.id, site.name) },
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                  modifier = Modifier.height(32.dp),
+                ) {
+                  Text("Remove", style = MaterialTheme.typography.labelSmall)
+                }
+              }
             }
           }
         }
       }
 
-      // Tabs: Photos Taken vs Site Locations
-      SecondaryTabRow(
-        selectedTabIndex = selectedTabIndex,
-        containerColor = Color(0xFF1E293B),
-        contentColor = Color.White,
-      ) {
-        Tab(
-          selected = selectedTabIndex == 0,
-          onClick = { selectedTabIndex = 0 },
-          text = { Text("Photos Taken (${uiState.customerPhotos.size})") },
-        )
-        Tab(
-          selected = selectedTabIndex == 1,
-          onClick = { selectedTabIndex = 1 },
-          text = { Text("Site Locations (${selectedCustomer.locations.size})") },
-        )
-      }
-
-      if (selectedTabIndex == 0) {
-        // Tab 0: Photos Taken by Customer (shows Customer + Saved Site Location on every photo)
-        CustomerPhotosSection(
-          customer = selectedCustomer,
-          photos = uiState.customerPhotos,
-          isLoading = uiState.isLoadingCustomerPhotos,
-          photoBitmapsCache = uiState.photoBitmapsCache,
-          onTriggerDemoAi = onTriggerDemoAi,
-          onShowPartsForPhoto = onShowPartsForPhoto,
-          modifier = Modifier.weight(1f),
-        )
-      } else {
-        // Tab 1: Multiple Locations for Customer
-        CustomerLocationsSection(
-          customer = selectedCustomer,
-          currentLocation = uiState.currentLocation,
-          onAddLocationClick = { showAddLocationDialog = true },
-          onTagLocationClick = { locId ->
-            onSetAsActiveCustomerAndLocation(selectedCustomer.id, locId)
-          },
-          onDeleteLocationClick = { locId, locLabel ->
-            locationPendingDeletion = locId to locLabel
-          },
-          modifier = Modifier.weight(1f),
-        )
+      else -> {
+        // Tab 2: GPS & App Settings (Geofence Radius, etc.)
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = Color(0xFF1E293B),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Text(
+              text = "GPS Auto-Detect Geofence Radius",
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+            )
+            Text(
+              text =
+                "Maximum distance from a saved customer site location for JobSight to automatically tag that customer:",
+              style = MaterialTheme.typography.bodySmall,
+              color = Color(0xFF94A3B8),
+            )
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              listOf(50f, 100f, 250f, 500f).forEach { radius ->
+                val isSelected = uiState.geofenceRadiusMeters == radius
+                FilterChip(
+                  selected = isSelected,
+                  onClick = { onSetGeofenceRadius(radius) },
+                  label = {
+                    Text(
+                      text = "${radius.toInt()}m",
+                      color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                    )
+                  },
+                  colors =
+                    FilterChipDefaults.filterChipColors(
+                      selectedContainerColor = Color(0xFF0284C7),
+                      containerColor = Color(0xFF0F172A),
+                    ),
+                )
+              }
+            }
+          }
+        }
       }
     }
   }
 
-  // Confirm Remove Customer Dialog (cascades and deletes all locations for that customer)
+  if (showNewCustomerDialog) {
+    AddCustomerDialog(
+      hasCurrentGps = uiState.currentLocation != null,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { name, locLabel, useGps, address ->
+        showNewCustomerDialog = false
+        onCreateCustomer(name, locLabel, useGps, address)
+      },
+      onDismiss = { showNewCustomerDialog = false },
+    )
+  }
+
+  customerForNewLocation?.let { targetCustomer ->
+    AddLocationDialog(
+      customerName = targetCustomer.name,
+      currentLocation = uiState.currentLocation,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { label, useGps, address ->
+        customerForNewLocation = null
+        onAddLocationToCustomer(targetCustomer.id, label, useGps, address)
+      },
+      onDismiss = { customerForNewLocation = null },
+    )
+  }
+
   customerPendingDeletion?.let { cust ->
     AlertDialog(
       onDismissRequest = { customerPendingDeletion = null },
@@ -1048,14 +1386,11 @@ private fun CustomerHubBottomSheet(
     )
   }
 
-  // Confirm Remove Site Location Dialog
   locationPendingDeletion?.let { (locId, locLabel) ->
     AlertDialog(
       onDismissRequest = { locationPendingDeletion = null },
       title = { Text("Remove Site Location?") },
-      text = {
-        Text("Are you sure you want to remove the location '$locLabel'?")
-      },
+      text = { Text("Are you sure you want to remove the location '$locLabel'?") },
       confirmButton = {
         Button(
           onClick = {
@@ -1076,31 +1411,6 @@ private fun CustomerHubBottomSheet(
           Text("Cancel")
         }
       },
-    )
-  }
-
-  if (showNewCustomerDialog) {
-    AddCustomerDialog(
-      hasCurrentGps = uiState.currentLocation != null,
-      isSaving = uiState.isSavingCustomerOrLocation,
-      onConfirm = { name, locLabel, useGps, address ->
-        showNewCustomerDialog = false
-        onCreateCustomer(name, locLabel, useGps, address)
-      },
-      onDismiss = { showNewCustomerDialog = false },
-    )
-  }
-
-  if (showAddLocationDialog && selectedCustomer != null) {
-    AddLocationDialog(
-      customerName = selectedCustomer.name,
-      currentLocation = uiState.currentLocation,
-      isSaving = uiState.isSavingCustomerOrLocation,
-      onConfirm = { label, useGps, address ->
-        showAddLocationDialog = false
-        onAddLocationToCustomer(selectedCustomer.id, label, useGps, address)
-      },
-      onDismiss = { showAddLocationDialog = false },
     )
   }
 }
@@ -1160,7 +1470,6 @@ private fun CustomerPhotosSection(
           modifier = Modifier.padding(12.dp),
           verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-          // Photo Preview Image
           Box(
             modifier =
               Modifier.fillMaxWidth()
@@ -1185,7 +1494,6 @@ private fun CustomerPhotosSection(
             }
           }
 
-          // Customer + Site Location metadata card saved with the photo
           Surface(
             shape = RoundedCornerShape(8.dp),
             color = Color(0xFF0F172A),
@@ -1248,135 +1556,6 @@ private fun CustomerPhotosSection(
                 onClick = { onTriggerDemoAi(photo.id) },
               ) {
                 Text("Simulate AI ID", style = MaterialTheme.typography.labelSmall)
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun CustomerLocationsSection(
-  customer: Customer,
-  currentLocation: Location?,
-  onAddLocationClick: () -> Unit,
-  onTagLocationClick: (Long) -> Unit,
-  onDeleteLocationClick: (Long, String) -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  Column(
-    modifier = modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text(
-        text = "Saved Job Site Locations",
-        style = MaterialTheme.typography.titleSmall,
-        color = Color(0xFFCBD5E1),
-        modifier = Modifier.weight(1f).padding(end = 8.dp),
-      )
-      Button(
-        onClick = onAddLocationClick,
-        colors =
-          ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF0284C7),
-            contentColor = Color.White,
-          ),
-      ) {
-        Text("+ Add Location")
-      }
-    }
-
-    LazyColumn(
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-      modifier = Modifier.weight(1f),
-    ) {
-      items(customer.locations, key = { it.id }) { loc ->
-        val distMeters =
-          currentLocation?.let {
-            LocationTracker.distanceBetween(it, loc.latitude, loc.longitude)
-          }
-        val isInsideGeofence = distMeters != null && distMeters < 100f
-
-        Card(
-          colors =
-            CardDefaults.cardColors(
-              containerColor = if (isInsideGeofence) Color(0xFF064E3B) else Color(0xFF1E293B)
-            ),
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                  text = loc.label,
-                  fontWeight = FontWeight.Bold,
-                  color = Color.White,
-                )
-                Text(
-                  text = loc.address,
-                  style = MaterialTheme.typography.bodySmall,
-                  color = Color(0xFFD1D5DB),
-                )
-                Text(
-                  text =
-                    "Coords: ${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)}",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color(0xFF94A3B8),
-                )
-              }
-              if (distMeters != null) {
-                Surface(
-                  shape = RoundedCornerShape(8.dp),
-                  color = if (isInsideGeofence) Color(0xFF10B981) else Color(0xFF334155),
-                ) {
-                  Text(
-                    text = "${distMeters.roundToInt()}m",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                  )
-                }
-              }
-            }
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              OutlinedButton(
-                onClick = { onTagLocationClick(loc.id) },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-                modifier = Modifier.weight(1f).height(34.dp),
-              ) {
-                Text(
-                  text = "Tag Camera Here",
-                  style = MaterialTheme.typography.labelSmall,
-                )
-              }
-              OutlinedButton(
-                onClick = { onDeleteLocationClick(loc.id, loc.label) },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                modifier = Modifier.height(34.dp),
-              ) {
-                Text(
-                  text = "Remove",
-                  style = MaterialTheme.typography.labelSmall,
-                )
               }
             }
           }
@@ -1710,7 +1889,7 @@ private fun AiPartAnalysisBottomSheet(
       }
       Row(verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onOpenSearchSitesSettings) {
-          Text("Search Sites", color = Color(0xFF34D399))
+          Text("⚙ Sites", color = Color(0xFF34D399))
         }
         TextButton(onClick = onClose) {
           Text("Done", color = Color(0xFF38BDF8))
@@ -1832,7 +2011,7 @@ private fun AiPartAnalysisBottomSheet(
             onOpenSearchSitesSettings()
           }
         ) {
-          Text("Manage Search Sites", color = Color(0xFF38BDF8))
+          Text("⚙ Manage Search Sites", color = Color(0xFF38BDF8))
         }
       },
       dismissButton = {
@@ -1842,138 +2021,6 @@ private fun AiPartAnalysisBottomSheet(
       },
     )
   }
-}
-
-@Composable
-private fun SearchSitesSettingsDialog(
-  searchSites: List<SearchSite>,
-  onAddSite: (String, String) -> Unit,
-  onDeleteSite: (Long, String) -> Unit,
-  onDismiss: () -> Unit,
-) {
-  var newSiteName by remember { mutableStateOf("") }
-  var newSiteUrl by remember { mutableStateOf("") }
-
-  AlertDialog(
-    onDismissRequest = onDismiss,
-    containerColor = Color(0xFF1E293B),
-    titleContentColor = Color.White,
-    textContentColor = Color.White,
-    title = { Text("Part Search Sites Settings", fontWeight = FontWeight.Bold) },
-    text = {
-      Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Text(
-          text = "Configure which websites appear when you tap 'Search Online' on an identified HVAC part.",
-          style = MaterialTheme.typography.bodySmall,
-          color = Color(0xFFCBD5E1),
-        )
-
-        // Add new search site form
-        Surface(
-          shape = RoundedCornerShape(10.dp),
-          color = Color(0xFF0F172A),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            Text(
-              text = "Add a Search Site",
-              style = MaterialTheme.typography.labelMedium,
-              fontWeight = FontWeight.Bold,
-              color = Color(0xFF38BDF8),
-            )
-            OutlinedTextField(
-              value = newSiteName,
-              onValueChange = { newSiteName = it },
-              label = { Text("Site Name (e.g. Ferguson, Johnstone)") },
-              singleLine = true,
-              modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-              value = newSiteUrl,
-              onValueChange = { newSiteUrl = it },
-              label = { Text("Domain or Search URL") },
-              placeholder = { Text("e.g. ferguson.com or https://.../search?q={query}") },
-              singleLine = true,
-              modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-              enabled = newSiteName.isNotBlank() && newSiteUrl.isNotBlank(),
-              onClick = {
-                onAddSite(newSiteName, newSiteUrl)
-                newSiteName = ""
-                newSiteUrl = ""
-              },
-              colors =
-                ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF10B981),
-                  contentColor = Color.White,
-                ),
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Text("+ Add Search Site")
-            }
-          }
-        }
-
-        Text(
-          text = "Saved Search Sites (${searchSites.size})",
-          style = MaterialTheme.typography.labelMedium,
-          color = Color(0xFF94A3B8),
-        )
-
-        LazyColumn(
-          verticalArrangement = Arrangement.spacedBy(6.dp),
-          modifier = Modifier.height(200.dp).fillMaxWidth(),
-        ) {
-          items(searchSites, key = { it.id }) { site ->
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = Color(0xFF0F172A),
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-              ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                  Text(
-                    text = site.name,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                  )
-                  Text(
-                    text = site.urlTemplate,
-                    color = Color(0xFF94A3B8),
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                }
-                TextButton(
-                  onClick = { onDeleteSite(site.id, site.name) },
-                ) {
-                  Text("Remove", color = Color(0xFFF87171), style = MaterialTheme.typography.labelSmall)
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    confirmButton = {
-      TextButton(onClick = onDismiss) {
-        Text("Done", color = Color(0xFF38BDF8))
-      }
-    },
-  )
 }
 
 private fun capturePhotoToCache(

@@ -42,15 +42,20 @@ data class FieldCameraUiState(
   val photoBitmapsCache: Map<String, ByteArray> = emptyMap(),
   val searchSites: List<SearchSite> = SearchSite.DEFAULT_SITES,
   val isSearchSitesSettingsVisible: Boolean = false,
+  val isSettingsSheetVisible: Boolean = false,
+  val geofenceRadiusMeters: Float = CustomerMatch.GEOFENCE_RADIUS_METERS,
   val isSavingCustomerOrLocation: Boolean = false,
   val statusBannerMessage: String? = null,
   val errorMessage: String? = null,
 ) {
+  val isClosestWithinGeofence: Boolean
+    get() = closestMatch != null && closestMatch.distanceMeters < geofenceRadiusMeters
+
   val autoDetectedCustomer: Customer?
-    get() = closestMatch?.takeIf { it.isWithinGeofence }?.customer
+    get() = closestMatch?.takeIf { isClosestWithinGeofence }?.customer
 
   val autoDetectedLocation: CustomerLocation?
-    get() = closestMatch?.takeIf { it.isWithinGeofence }?.matchedLocation
+    get() = closestMatch?.takeIf { isClosestWithinGeofence }?.matchedLocation
 
   val manualSelectedCustomer: Customer?
     get() = manualCustomerOverrideId?.let { id -> customers.find { it.id == id } }
@@ -107,12 +112,40 @@ class MainScreenViewModel(
   }
 
   fun openSearchSitesSettings() {
-    _uiState.update { it.copy(isSearchSitesSettingsVisible = true) }
+    _uiState.update {
+      it.copy(
+        isSearchSitesSettingsVisible = true,
+        isSettingsSheetVisible = true,
+      )
+    }
     refreshSearchSites()
   }
 
   fun closeSearchSitesSettings() {
     _uiState.update { it.copy(isSearchSitesSettingsVisible = false) }
+  }
+
+  fun openSettingsSheet() {
+    _uiState.update { it.copy(isSettingsSheetVisible = true) }
+    refreshSearchSites()
+  }
+
+  fun closeSettingsSheet() {
+    _uiState.update {
+      it.copy(
+        isSettingsSheetVisible = false,
+        isSearchSitesSettingsVisible = false,
+      )
+    }
+  }
+
+  fun setGeofenceRadiusMeters(radiusMeters: Float) {
+    _uiState.update {
+      it.copy(
+        geofenceRadiusMeters = radiusMeters,
+        statusBannerMessage = "Auto-detect GPS radius set to ${radiusMeters.toInt()}m",
+      )
+    }
   }
 
   fun addSearchSite(name: String, urlOrDomain: String) {
