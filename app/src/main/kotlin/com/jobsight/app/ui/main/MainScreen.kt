@@ -388,7 +388,7 @@ internal fun FieldCameraContent(
             activeCustomer != null ->
               "Auto-tagging: ${activeCustomer.name}$locSuffix"
             else ->
-              "Untagged Capture • Tap 'Select Customer' above to tag manually"
+              "No Customer Selected • Taking a photo will prompt you to choose one"
           },
         color = Color.White.copy(alpha = 0.9f),
         style = MaterialTheme.typography.labelMedium,
@@ -668,9 +668,22 @@ private fun CustomerTagListDialog(
     textContentColor = Color.White,
     title = {
       Column {
-        Text("Select Customer for Photo Tag", fontWeight = FontWeight.Bold)
         Text(
-          text = "Tap a customer site below or create a new customer",
+          text =
+            if (uiState.hasPendingPhotoAwaitingCustomer) {
+              "Select Customer to Save Photo"
+            } else {
+              "Select Customer for Photo Tag"
+            },
+          fontWeight = FontWeight.Bold,
+        )
+        Text(
+          text =
+            if (uiState.hasPendingPhotoAwaitingCustomer) {
+              "Choose which customer to save the captured photo to (or add a new customer)"
+            } else {
+              "Tap a customer site below or create a new customer"
+            },
           style = MaterialTheme.typography.bodySmall,
           color = Color(0xFF94A3B8),
         )
@@ -718,46 +731,48 @@ private fun CustomerTagListDialog(
           }
         }
 
-        // 1. Auto-Detect via GPS option
-        item {
-          val isAutoMode = uiState.manualCustomerOverrideId == null
-          val radiusLabel = LocationTracker.formatDistanceImperial(uiState.geofenceRadiusMeters)
-          val autoDetectedName =
-            uiState.autoDetectedCustomer?.let { cust ->
-              val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
-              "${cust.name}$locName"
-            } ?: "No customer within $radiusLabel"
+        // 1. Auto-Detect via GPS option (hide if user needs to pick a customer for a pending photo and GPS didn't match)
+        if (!uiState.hasPendingPhotoAwaitingCustomer || uiState.autoDetectedCustomer != null) {
+          item {
+            val isAutoMode = uiState.manualCustomerOverrideId == null
+            val radiusLabel = LocationTracker.formatDistanceImperial(uiState.geofenceRadiusMeters)
+            val autoDetectedName =
+              uiState.autoDetectedCustomer?.let { cust ->
+                val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
+                "${cust.name}$locName"
+              } ?: "No customer within $radiusLabel"
 
-          Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
-            modifier =
-              Modifier.fillMaxWidth()
-                .clickable { onSelectCustomerAndLocation(null, null) },
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable { onSelectCustomerAndLocation(null, null) },
             ) {
-              Column(modifier = Modifier.weight(1f)) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = "Auto-Detect via GPS",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                  Text(
+                    text = autoDetectedName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFD1D5DB),
+                  )
+                }
                 Text(
-                  text = "Auto-Detect via GPS",
+                  text = if (isAutoMode) "Active ✓" else "Use →",
+                  color = Color(0xFF34D399),
+                  style = MaterialTheme.typography.labelMedium,
                   fontWeight = FontWeight.Bold,
-                  color = Color.White,
-                )
-                Text(
-                  text = autoDetectedName,
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color(0xFFD1D5DB),
                 )
               }
-              Text(
-                text = if (isAutoMode) "Active ✓" else "Use →",
-                color = Color(0xFF34D399),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-              )
             }
           }
         }

@@ -35,6 +35,7 @@ data class FieldCameraUiState(
   val detectedParts: List<HvacPartAnalysis> = emptyList(),
   val isBottomSheetVisible: Boolean = false,
   val isCustomerPickerVisible: Boolean = false,
+  val hasPendingPhotoAwaitingCustomer: Boolean = false,
   val isCustomerHubVisible: Boolean = false,
   val selectedHubCustomerId: Long? = null,
   val customerPhotos: List<CapturedPhotoRow> = emptyList(),
@@ -94,6 +95,7 @@ class MainScreenViewModel(
   val uiState: StateFlow<FieldCameraUiState> = _uiState.asStateFlow()
 
   private var aiAnalysisSubscriptionJob: Job? = null
+  private var pendingCachedPhotoFile: File? = null
 
   init {
     refreshCustomers()
@@ -250,7 +252,27 @@ class MainScreenViewModel(
   }
 
   fun closeCustomerPicker() {
-    _uiState.update { it.copy(isCustomerPickerVisible = false) }
+    val orphanFile = pendingCachedPhotoFile
+    if (orphanFile != null) {
+      pendingCachedPhotoFile = null
+      if (orphanFile.exists()) {
+        orphanFile.delete()
+      }
+      _uiState.update {
+        it.copy(
+          isCustomerPickerVisible = false,
+          hasPendingPhotoAwaitingCustomer = false,
+          statusBannerMessage = "Photo cancelled (no customer selected)",
+        )
+      }
+    } else {
+      _uiState.update {
+        it.copy(
+          isCustomerPickerVisible = false,
+          hasPendingPhotoAwaitingCustomer = false,
+        )
+      }
+    }
   }
 
   fun selectCustomerManually(customerId: Long?, locationId: Long? = null) {
@@ -273,9 +295,18 @@ class MainScreenViewModel(
             val locSuffix = chosenLocation?.let { " • ${it.label}" }.orEmpty()
             "Selected: ${chosenCustomer.name}$locSuffix"
           } else {
-            "Resumed GPS Auto-Detect (< 100m geofence)"
+            val radiusLabel = LocationTracker.formatDistanceImperial(state.geofenceRadiusMeters)
+            "Resumed GPS Auto-Detect (< $radiusLabel)"
           },
       )
+    }
+
+    val pendingFile = pendingCachedPhotoFile
+    val nowActiveCustomer = _uiState.value.activeCustomer
+    if (pendingFile != null && nowActiveCustomer != null) {
+      pendingCachedPhotoFile = null
+      _uiState.update { it.copy(hasPendingPhotoAwaitingCustomer = false) }
+      onPhotoCapturedToCache(pendingFile)
     }
   }
 
@@ -405,6 +436,13 @@ class MainScreenViewModel(
           )
         }
         loadPhotosForCustomer(createdCustomer.id)
+
+        val pendingFile = pendingCachedPhotoFile
+        if (pendingFile != null && _uiState.value.activeCustomer != null) {
+          pendingCachedPhotoFile = null
+          _uiState.update { it.copy(hasPendingPhotoAwaitingCustomer = false) }
+          onPhotoCapturedToCache(pendingFile)
+        }
       } catch (e: Exception) {
         _uiState.update {
           it.copy(
@@ -563,8 +601,20 @@ class MainScreenViewModel(
 
   fun onPhotoCapturedToCache(cacheFile: File) {
     val activeCust = _uiState.value.activeCustomer
+    if (activeCust == null) {
+      pendingCachedPhotoFile = cacheFile
+      _uiState.update {
+        it.copy(
+          hasPendingPhotoAwaitingCustomer = true,
+          isCustomerPickerVisible = true,
+          statusBannerMessage = "Select a customer to save your photo",
+        )
+      }
+      return
+    }
+
     val activeLoc = _uiState.value.activeCustomerLocation
-    val taggedCustomerName = activeCust?.name ?: "Untagged Site"
+    val taggedCustomerName = activeCust.name
     val taggedLocationLabel = activeLoc?.label?.let { " ($it)" }.orEmpty()
 
     viewModelScope.launch {
