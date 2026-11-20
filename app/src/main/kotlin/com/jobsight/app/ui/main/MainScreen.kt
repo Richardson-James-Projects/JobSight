@@ -402,7 +402,7 @@ private fun CompanyAuthScreen(
           },
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = if (isCreateMode) Color(0xFFEE4D38) else Color(0xFF0F93E8),
+              containerColor = Color(0xFF0F93E8),
               contentColor = Color.White,
             ),
           modifier = Modifier.fillMaxWidth().height(46.dp),
@@ -1557,26 +1557,16 @@ private fun AppSettingsBottomSheet(
     when (selectedTab) {
       0 -> {
         // Tab 0: Customers & Locations Management
-        Row(
+        Button(
+          onClick = { showNewCustomerDialog = true },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF0F93E8),
+              contentColor = Color.White,
+            ),
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Text(
-            text = "Customers & Their Site Locations",
-            style = MaterialTheme.typography.titleSmall,
-            color = Color(0xFFCBD5E1),
-          )
-          Button(
-            onClick = { showNewCustomerDialog = true },
-            colors =
-              ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFEE4D38),
-                contentColor = Color.White,
-              ),
-          ) {
-            Text("+ Add Customer", fontWeight = FontWeight.Bold)
-          }
+          Text("+ Add Customer", fontWeight = FontWeight.Bold)
         }
 
         LazyColumn(
@@ -1611,7 +1601,10 @@ private fun AppSettingsBottomSheet(
                       color = Color(0xFF94A3B8),
                     )
                   }
-                  Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                  ) {
                     FilledTonalButton(
                       onClick = { customerForNewLocation = customer },
                       colors =
@@ -1627,15 +1620,15 @@ private fun AppSettingsBottomSheet(
                     OutlinedButton(
                       onClick = { customerPendingDeletion = customer },
                       colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                      modifier = Modifier.height(32.dp),
+                      contentPadding = PaddingValues(0.dp),
+                      modifier = Modifier.size(32.dp),
                     ) {
-                      Text("Remove", style = MaterialTheme.typography.labelSmall)
+                      Text("✕", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     }
                   }
                 }
 
-                // List each site location under this customer with a Remove button
+                // List each site location under this customer with an ✕ delete button
                 customer.locations.forEach { loc ->
                   Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -1662,13 +1655,18 @@ private fun AppSettingsBottomSheet(
                           overflow = TextOverflow.Ellipsis,
                         )
                       }
-                      TextButton(
-                        onClick = { locationPendingDeletion = loc.id to loc.label },
+                      Box(
+                        contentAlignment = Alignment.Center,
+                        modifier =
+                          Modifier.size(28.dp)
+                            .clip(CircleShape)
+                            .clickable { locationPendingDeletion = loc.id to loc.label },
                       ) {
                         Text(
-                          text = "Remove",
+                          text = "✕",
                           color = Color(0xFFF87171),
-                          style = MaterialTheme.typography.labelSmall,
+                          style = MaterialTheme.typography.labelMedium,
+                          fontWeight = FontWeight.Bold,
                         )
                       }
                     }
@@ -1721,7 +1719,7 @@ private fun AppSettingsBottomSheet(
               },
               colors =
                 ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFFEE4D38),
+                  containerColor = Color(0xFF0F93E8),
                   contentColor = Color.White,
                 ),
               modifier = Modifier.fillMaxWidth(),
@@ -1763,9 +1761,10 @@ private fun AppSettingsBottomSheet(
                 OutlinedButton(
                   onClick = { onDeleteSearchSite(site.id, site.name) },
                   colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                  modifier = Modifier.height(32.dp),
+                  contentPadding = PaddingValues(0.dp),
+                  modifier = Modifier.size(32.dp),
                 ) {
-                  Text("Remove", style = MaterialTheme.typography.labelSmall)
+                  Text("✕", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
               }
             }
