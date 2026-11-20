@@ -70,6 +70,57 @@ data class HvacPartAnalysis(
   @SerialName("search_query") val searchQuery: String,
 )
 
+@Serializable
+data class SearchSite(
+  val id: Long,
+  val name: String,
+  @SerialName("url_template") val urlTemplate: String,
+) {
+  fun buildSearchUrl(encodedQuery: String): String {
+    val trimmed = urlTemplate.trim()
+    return when {
+      trimmed.contains("{query}") -> trimmed.replace("{query}", encodedQuery)
+      trimmed.startsWith("http://") || trimmed.startsWith("https://") -> {
+        if (trimmed.contains("?")) "$trimmed$encodedQuery"
+        else "https://www.google.com/search?q=site:${trimmed.removePrefix("https://").removePrefix("http://").trimEnd('/')}+$encodedQuery"
+      }
+      else -> "https://www.google.com/search?q=site:${trimmed.trimEnd('/')}+$encodedQuery"
+    }
+  }
+
+  companion object {
+    val DEFAULT_SITES =
+      listOf(
+        SearchSite(
+          id = -1L,
+          name = "SupplyHouse.com",
+          urlTemplate = "https://www.supplyhouse.com/sh/control/search/~SEARCH_STRING={query}",
+        ),
+        SearchSite(
+          id = -2L,
+          name = "Grainger",
+          urlTemplate = "https://www.grainger.com/search?searchQuery={query}",
+        ),
+        SearchSite(
+          id = -3L,
+          name = "RepairClinic",
+          urlTemplate = "https://www.repairclinic.com/Shop-For-Parts?query={query}",
+        ),
+        SearchSite(
+          id = -4L,
+          name = "Google Search",
+          urlTemplate = "https://www.google.com/search?q={query}",
+        ),
+      )
+  }
+}
+
+@Serializable
+data class CreateSearchSiteRequest(
+  val name: String,
+  @SerialName("url_template") val urlTemplate: String,
+)
+
 data class ResolvedAddress(
   val formattedAddress: String,
   val latitude: Double,

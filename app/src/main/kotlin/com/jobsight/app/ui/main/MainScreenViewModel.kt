@@ -10,6 +10,7 @@ import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.CustomerMatch
 import com.jobsight.app.data.DataRepository
 import com.jobsight.app.data.HvacPartAnalysis
+import com.jobsight.app.data.SearchSite
 import com.jobsight.app.location.LocationTracker
 import java.io.File
 import kotlinx.coroutines.Job
@@ -39,6 +40,8 @@ data class FieldCameraUiState(
   val customerPhotos: List<CapturedPhotoRow> = emptyList(),
   val isLoadingCustomerPhotos: Boolean = false,
   val photoBitmapsCache: Map<String, ByteArray> = emptyMap(),
+  val searchSites: List<SearchSite> = SearchSite.DEFAULT_SITES,
+  val isSearchSitesSettingsVisible: Boolean = false,
   val isSavingCustomerOrLocation: Boolean = false,
   val statusBannerMessage: String? = null,
   val errorMessage: String? = null,
@@ -89,6 +92,69 @@ class MainScreenViewModel(
 
   init {
     refreshCustomers()
+    refreshSearchSites()
+  }
+
+  fun refreshSearchSites() {
+    viewModelScope.launch {
+      try {
+        val sites = dataRepository.getSearchSites()
+        _uiState.update { it.copy(searchSites = sites) }
+      } catch (_: Exception) {
+        // Keep default search sites on transient error
+      }
+    }
+  }
+
+  fun openSearchSitesSettings() {
+    _uiState.update { it.copy(isSearchSitesSettingsVisible = true) }
+    refreshSearchSites()
+  }
+
+  fun closeSearchSitesSettings() {
+    _uiState.update { it.copy(isSearchSitesSettingsVisible = false) }
+  }
+
+  fun addSearchSite(name: String, urlOrDomain: String) {
+    val cleanName = name.trim()
+    val cleanUrl = urlOrDomain.trim()
+    if (cleanName.isEmpty() || cleanUrl.isEmpty()) return
+
+    viewModelScope.launch {
+      try {
+        dataRepository.addSearchSite(cleanName, cleanUrl)
+        val updatedSites = dataRepository.getSearchSites()
+        _uiState.update {
+          it.copy(
+            searchSites = updatedSites,
+            statusBannerMessage = "Added search site '$cleanName'",
+          )
+        }
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not add search site: ${e.message}")
+        }
+      }
+    }
+  }
+
+  fun deleteSearchSite(siteId: Long, siteName: String) {
+    viewModelScope.launch {
+      try {
+        dataRepository.deleteSearchSite(siteId)
+        val updatedSites = dataRepository.getSearchSites()
+        _uiState.update {
+          it.copy(
+            searchSites = updatedSites,
+            statusBannerMessage = "Removed search site '$siteName'",
+          )
+        }
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not remove search site: ${e.message}")
+        }
+      }
+    }
   }
 
   fun refreshCustomers() {

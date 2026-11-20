@@ -91,6 +91,7 @@ import com.jobsight.app.data.CapturedPhotoRow
 import com.jobsight.app.data.Customer
 import com.jobsight.app.data.DefaultDataRepository
 import com.jobsight.app.data.HvacPartAnalysis
+import com.jobsight.app.data.SearchSite
 import com.jobsight.app.location.LocationTracker
 import java.io.File
 import kotlin.math.roundToInt
@@ -176,6 +177,10 @@ fun MainScreen(
     onDeleteCustomer = viewModel::deleteCustomer,
     onAddLocationToCustomer = viewModel::addLocationToCustomer,
     onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
+    onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
+    onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
+    onAddSearchSite = viewModel::addSearchSite,
+    onDeleteSearchSite = viewModel::deleteSearchSite,
     onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
     onShowPartsForPhoto = viewModel::showPartsForPhoto,
     onDismissBottomSheet = viewModel::dismissBottomSheet,
@@ -203,6 +208,10 @@ internal fun FieldCameraContent(
   onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
+  onOpenSearchSitesSettings: () -> Unit,
+  onCloseSearchSitesSettings: () -> Unit,
+  onAddSearchSite: (String, String) -> Unit,
+  onDeleteSearchSite: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onDismissBottomSheet: () -> Unit,
@@ -413,6 +422,7 @@ internal fun FieldCameraContent(
         onDeleteCustomer = onDeleteCustomer,
         onAddLocationToCustomer = onAddLocationToCustomer,
         onDeleteLocationFromCustomer = onDeleteLocationFromCustomer,
+        onOpenSearchSitesSettings = onOpenSearchSitesSettings,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -433,15 +443,26 @@ internal fun FieldCameraContent(
       AiPartAnalysisBottomSheet(
         customerName = (uiState.activeCustomer?.name ?: "Job Site Capture") + locLabel,
         parts = uiState.detectedParts,
-        onSearchPartOnline = { query ->
-          val searchUri =
-            Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")
-          val intent = Intent(Intent.ACTION_VIEW, searchUri)
+        searchSites = uiState.searchSites,
+        onOpenSearchSitesSettings = onOpenSearchSitesSettings,
+        onSearchPartOnSite = { site, query ->
+          val fullUrl = site.buildSearchUrl(Uri.encode(query))
+          val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
           context.startActivity(intent)
         },
         onClose = onDismissBottomSheet,
       )
     }
+  }
+
+  // 7. Search Sites Settings Dialog
+  if (uiState.isSearchSitesSettingsVisible) {
+    SearchSitesSettingsDialog(
+      searchSites = uiState.searchSites,
+      onAddSite = onAddSearchSite,
+      onDeleteSite = onDeleteSearchSite,
+      onDismiss = onCloseSearchSitesSettings,
+    )
   }
 }
 
@@ -785,6 +806,7 @@ private fun CustomerHubBottomSheet(
   onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
+  onOpenSearchSitesSettings: () -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
@@ -823,15 +845,28 @@ private fun CustomerHubBottomSheet(
           color = Color(0xFF94A3B8),
         )
       }
-      Button(
-        onClick = { showNewCustomerDialog = true },
-        colors =
-          ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF10B981),
-            contentColor = Color.White,
-          ),
+      Column(
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
-        Text("+ New Customer", fontWeight = FontWeight.Bold)
+        Button(
+          onClick = { showNewCustomerDialog = true },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF10B981),
+              contentColor = Color.White,
+            ),
+          modifier = Modifier.height(34.dp),
+        ) {
+          Text("+ New Customer", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+        OutlinedButton(
+          onClick = onOpenSearchSitesSettings,
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+          modifier = Modifier.height(32.dp),
+        ) {
+          Text("Search Sites (${uiState.searchSites.size})", style = MaterialTheme.typography.labelSmall)
+        }
       }
     }
 
@@ -1641,9 +1676,13 @@ private fun PermissionPromptOverlay(
 private fun AiPartAnalysisBottomSheet(
   customerName: String,
   parts: List<HvacPartAnalysis>,
-  onSearchPartOnline: (String) -> Unit,
+  searchSites: List<SearchSite>,
+  onOpenSearchSitesSettings: () -> Unit,
+  onSearchPartOnSite: (SearchSite, String) -> Unit,
   onClose: () -> Unit,
 ) {
+  var partPendingSiteSelection by remember { mutableStateOf<HvacPartAnalysis?>(null) }
+
   Column(
     modifier =
       Modifier.fillMaxWidth()
@@ -1656,7 +1695,7 @@ private fun AiPartAnalysisBottomSheet(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column {
+      Column(modifier = Modifier.weight(1f)) {
         Text(
           text = "AI HVAC Part Identification",
           style = MaterialTheme.typography.titleLarge,
@@ -1669,8 +1708,13 @@ private fun AiPartAnalysisBottomSheet(
           color = Color(0xFF9CA3AF),
         )
       }
-      TextButton(onClick = onClose) {
-        Text("Done", color = Color(0xFF38BDF8))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onOpenSearchSitesSettings) {
+          Text("Search Sites", color = Color(0xFF34D399))
+        }
+        TextButton(onClick = onClose) {
+          Text("Done", color = Color(0xFF38BDF8))
+        }
       }
     }
 
@@ -1702,7 +1746,7 @@ private fun AiPartAnalysisBottomSheet(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Button(
-              onClick = { onSearchPartOnline(part.searchQuery) },
+              onClick = { partPendingSiteSelection = part },
               modifier = Modifier.fillMaxWidth(),
               colors =
                 ButtonDefaults.buttonColors(
@@ -1710,13 +1754,226 @@ private fun AiPartAnalysisBottomSheet(
                   contentColor = Color.White,
                 ),
             ) {
-              Text("Search Replacement Parts Online")
+              Text("Search Online")
             }
           }
         }
       }
     }
   }
+
+  // Popup to pick which configured search site to open for the selected HVAC part
+  partPendingSiteSelection?.let { selectedPart ->
+    AlertDialog(
+      onDismissRequest = { partPendingSiteSelection = null },
+      containerColor = Color(0xFF1E293B),
+      titleContentColor = Color.White,
+      textContentColor = Color.White,
+      title = {
+        Column {
+          Text("Choose Site to Search", fontWeight = FontWeight.Bold)
+          Text(
+            text = selectedPart.partName,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF94A3B8),
+          )
+        }
+      },
+      text = {
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          items(searchSites, key = { it.id }) { site ->
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = Color(0xFF0F172A),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable {
+                    partPendingSiteSelection = null
+                    onSearchPartOnSite(site, selectedPart.searchQuery)
+                  },
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = site.name,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                  Text(
+                    text = "Search: \"${selectedPart.searchQuery}\"",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF38BDF8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+                Text(
+                  text = "Open →",
+                  color = Color(0xFF34D399),
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                )
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            partPendingSiteSelection = null
+            onOpenSearchSitesSettings()
+          }
+        ) {
+          Text("Manage Search Sites", color = Color(0xFF38BDF8))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { partPendingSiteSelection = null }) {
+          Text("Cancel", color = Color(0xFF94A3B8))
+        }
+      },
+    )
+  }
+}
+
+@Composable
+private fun SearchSitesSettingsDialog(
+  searchSites: List<SearchSite>,
+  onAddSite: (String, String) -> Unit,
+  onDeleteSite: (Long, String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var newSiteName by remember { mutableStateOf("") }
+  var newSiteUrl by remember { mutableStateOf("") }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF1E293B),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = { Text("Part Search Sites Settings", fontWeight = FontWeight.Bold) },
+    text = {
+      Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Text(
+          text = "Configure which websites appear when you tap 'Search Online' on an identified HVAC part.",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFFCBD5E1),
+        )
+
+        // Add new search site form
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = Color(0xFF0F172A),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Text(
+              text = "Add a Search Site",
+              style = MaterialTheme.typography.labelMedium,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF38BDF8),
+            )
+            OutlinedTextField(
+              value = newSiteName,
+              onValueChange = { newSiteName = it },
+              label = { Text("Site Name (e.g. Ferguson, Johnstone)") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+              value = newSiteUrl,
+              onValueChange = { newSiteUrl = it },
+              label = { Text("Domain or Search URL") },
+              placeholder = { Text("e.g. ferguson.com or https://.../search?q={query}") },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+              enabled = newSiteName.isNotBlank() && newSiteUrl.isNotBlank(),
+              onClick = {
+                onAddSite(newSiteName, newSiteUrl)
+                newSiteName = ""
+                newSiteUrl = ""
+              },
+              colors =
+                ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF10B981),
+                  contentColor = Color.White,
+                ),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text("+ Add Search Site")
+            }
+          }
+        }
+
+        Text(
+          text = "Saved Search Sites (${searchSites.size})",
+          style = MaterialTheme.typography.labelMedium,
+          color = Color(0xFF94A3B8),
+        )
+
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier.height(200.dp).fillMaxWidth(),
+        ) {
+          items(searchSites, key = { it.id }) { site ->
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0xFF0F172A),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(
+                    text = site.name,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                  )
+                  Text(
+                    text = site.urlTemplate,
+                    color = Color(0xFF94A3B8),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+                TextButton(
+                  onClick = { onDeleteSite(site.id, site.name) },
+                ) {
+                  Text("Remove", color = Color(0xFFF87171), style = MaterialTheme.typography.labelSmall)
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Done", color = Color(0xFF38BDF8))
+      }
+    },
+  )
 }
 
 private fun capturePhotoToCache(

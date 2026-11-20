@@ -49,6 +49,10 @@ interface DataRepository {
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
   suspend fun downloadImageBytes(imageUrl: String): ByteArray?
 
+  suspend fun getSearchSites(): List<SearchSite>
+  suspend fun addSearchSite(name: String, urlTemplate: String): SearchSite
+  suspend fun deleteSearchSite(siteId: Long)
+
   suspend fun uploadPhotoAndFlushCache(
     cacheFile: File,
     customerId: Long?,
@@ -265,6 +269,83 @@ class DefaultDataRepository : DataRepository {
         }
       } catch (_: Exception) {
         null
+      }
+    }
+
+  override suspend fun getSearchSites(): List<SearchSite> =
+    withContext(Dispatchers.IO) {
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/search_sites?select=id,name,url_template&order=id.asc")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .get()
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+          throw IOException("Failed to fetch search sites (${response.code}): $body")
+        }
+        val list = json.decodeFromString<List<SearchSite>>(body)
+        list.ifEmpty { SearchSite.DEFAULT_SITES }
+      }
+    }
+
+  override suspend fun addSearchSite(name: String, urlTemplate: String): SearchSite =
+    withContext(Dispatchers.IO) {
+      val cleanName = name.trim()
+      val rawInput = urlTemplate.trim()
+      val normalizedTemplate =
+        when {
+          rawInput.contains("{query}") -> rawInput
+          rawInput.startsWith("http://") || rawInput.startsWith("https://") -> {
+            if (rawInput.contains("?")) "$rawInput{query}" else rawInput
+          }
+          else -> "https://www.google.com/search?q=site:${rawInput.trimEnd('/')}+{query}"
+        }
+
+      val payload =
+        json.encodeToString(
+          CreateSearchSiteRequest(
+            name = cleanName,
+            urlTemplate = normalizedTemplate,
+          )
+        )
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/search_sites")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .header("Content-Type", "application/json")
+          .header("Prefer", "return=representation")
+          .post(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+          throw IOException("Failed to add search site (${response.code}): $body")
+        }
+        json.decodeFromString<List<SearchSite>>(body).first()
+      }
+    }
+
+  override suspend fun deleteSearchSite(siteId: Long) =
+    withContext(Dispatchers.IO) {
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/search_sites?id=eq.$siteId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .delete()
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to delete search site (${response.code}): $body")
+        }
       }
     }
 

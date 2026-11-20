@@ -8,6 +8,7 @@ import com.jobsight.app.data.CustomerMatch
 import com.jobsight.app.data.DataRepository
 import com.jobsight.app.data.HvacPartAnalysis
 import com.jobsight.app.data.ResolvedAddress
+import com.jobsight.app.data.SearchSite
 import java.io.File
 import junit.framework.TestCase.assertEquals
 import junit.framework.TestCase.assertFalse
@@ -164,6 +165,13 @@ private class FakeJobSightRepository : DataRepository {
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> = emptyList()
 
   override suspend fun downloadImageBytes(imageUrl: String): ByteArray? = null
+
+  override suspend fun getSearchSites(): List<SearchSite> = SearchSite.DEFAULT_SITES
+
+  override suspend fun addSearchSite(name: String, urlTemplate: String): SearchSite =
+    SearchSite(id = 100L, name = name, urlTemplate = urlTemplate)
+
+  override suspend fun deleteSearchSite(siteId: Long) {}
 
   override suspend fun uploadPhotoAndFlushCache(
     cacheFile: File,
