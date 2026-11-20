@@ -431,6 +431,7 @@ class MainScreenViewModel(
               if (isAutoDetectedNow) null else createdCustomer.id,
             manualLocationOverrideId =
               if (isAutoDetectedNow) null else createdWithLocations.locations.firstOrNull()?.id,
+            isCustomerPickerVisible = false,
             selectedHubCustomerId = createdCustomer.id,
             statusBannerMessage = "Added & selected customer '${createdCustomer.name}'",
           )
@@ -493,6 +494,7 @@ class MainScreenViewModel(
           }
 
         val refreshedCustomers = dataRepository.getCustomers()
+        val shouldSelectForCamera = selectForCameraTag || pendingCachedPhotoFile != null
         _uiState.update { state ->
           val updatedMatch =
             state.currentLocation?.let { loc ->
@@ -503,23 +505,21 @@ class MainScreenViewModel(
             customers = refreshedCustomers,
             closestMatch = updatedMatch,
             manualCustomerOverrideId =
-              if (selectForCameraTag) customerId else state.manualCustomerOverrideId,
+              if (shouldSelectForCamera) customerId else state.manualCustomerOverrideId,
             manualLocationOverrideId =
-              if (selectForCameraTag) addedLocation.id else state.manualLocationOverrideId,
+              if (shouldSelectForCamera) addedLocation.id else state.manualLocationOverrideId,
             isCustomerPickerVisible =
-              if (selectForCameraTag) false else state.isCustomerPickerVisible,
+              if (shouldSelectForCamera) false else state.isCustomerPickerVisible,
             statusBannerMessage =
               "Added location '${addedLocation.label}' (${addedLocation.address})",
           )
         }
 
-        if (selectForCameraTag) {
-          val pendingFile = pendingCachedPhotoFile
-          if (pendingFile != null && _uiState.value.activeCustomer != null) {
-            pendingCachedPhotoFile = null
-            _uiState.update { it.copy(hasPendingPhotoAwaitingCustomer = false) }
-            onPhotoCapturedToCache(pendingFile)
-          }
+        val pendingFile = pendingCachedPhotoFile
+        if (pendingFile != null && _uiState.value.activeCustomer != null) {
+          pendingCachedPhotoFile = null
+          _uiState.update { it.copy(hasPendingPhotoAwaitingCustomer = false) }
+          onPhotoCapturedToCache(pendingFile)
         }
       } catch (e: Exception) {
         _uiState.update {

@@ -202,40 +202,46 @@ class DefaultDataRepository : DataRepository {
     withContext(Dispatchers.IO) {
       val trimmed = addressQuery.trim()
       if (trimmed.isEmpty()) {
-        throw IOException("Please enter a street address")
-      }
-      val encoded = URLEncoder.encode(trimmed, "UTF-8")
-      val request =
-        Request.Builder()
-          .url("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=$encoded")
-          .header("User-Agent", "JobSightAndroidApp/1.0 (com.jobsight.app)")
-          .get()
-          .build()
-
-      httpClient.newCall(request).execute().use { response ->
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          throw IOException("Geocoding service returned ${response.code}")
-        }
-        val array = json.parseToJsonElement(body) as? JsonArray
-        val first =
-          array?.firstOrNull() as? JsonObject
-            ?: throw IOException("Could not find coordinates for address: \"$trimmed\"")
-
-        val lat =
-          first["lat"]?.jsonPrimitive?.content?.toDoubleOrNull()
-            ?: throw IOException("Invalid latitude returned for address")
-        val lon =
-          first["lon"]?.jsonPrimitive?.content?.toDoubleOrNull()
-            ?: throw IOException("Invalid longitude returned for address")
-        val displayName = first["display_name"]?.jsonPrimitive?.content ?: trimmed
-
-        ResolvedAddress(
-          formattedAddress = displayName,
-          latitude = lat,
-          longitude = lon,
+        return@withContext ResolvedAddress(
+          formattedAddress = "Unspecified Address",
+          latitude = 0.0,
+          longitude = 0.0,
         )
       }
+      try {
+        val encoded = URLEncoder.encode(trimmed, "UTF-8")
+        val request =
+          Request.Builder()
+            .url("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=$encoded")
+            .header("User-Agent", "JobSightAndroidApp/1.0 (com.jobsight.app)")
+            .get()
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+          val body = response.body?.string().orEmpty()
+          if (response.isSuccessful) {
+            val array = json.parseToJsonElement(body) as? JsonArray
+            val first = array?.firstOrNull() as? JsonObject
+            val lat = first?.get("lat")?.jsonPrimitive?.content?.toDoubleOrNull()
+            val lon = first?.get("lon")?.jsonPrimitive?.content?.toDoubleOrNull()
+            if (lat != null && lon != null) {
+              return@withContext ResolvedAddress(
+                formattedAddress = trimmed,
+                latitude = lat,
+                longitude = lon,
+              )
+            }
+          }
+        }
+      } catch (_: Exception) {
+        // Fall back to saving the user's entered address text even if geocoder is offline or unrecognized
+      }
+
+      ResolvedAddress(
+        formattedAddress = trimmed,
+        latitude = 0.0,
+        longitude = 0.0,
+      )
     }
 
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> =

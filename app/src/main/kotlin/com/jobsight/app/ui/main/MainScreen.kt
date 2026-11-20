@@ -453,14 +453,12 @@ internal fun FieldCameraContent(
       uiState = uiState,
       onSelectCustomerAndLocation = onSelectCustomerManually,
       onCreateCustomerFromPicker = { name, locLabel, useGps, address ->
-        onCloseCustomerPicker()
         onCreateCustomer(name, locLabel, useGps, address)
       },
       onAddLocationFromPicker = { customerId, locLabel, useGps, address ->
         onAddAndSelectLocationForCustomer(customerId, locLabel, useGps, address)
       },
       onOpenSettingsClick = {
-        onCloseCustomerPicker()
         onOpenSettingsSheet()
       },
       onDismiss = onCloseCustomerPicker,
