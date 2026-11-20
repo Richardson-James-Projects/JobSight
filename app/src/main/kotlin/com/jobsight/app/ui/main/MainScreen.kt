@@ -1,6 +1,8 @@
 package com.jobsight.app.ui.main
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,6 +10,8 @@ import android.graphics.BitmapFactory
 import android.location.Geocoder
 import android.location.Location
 import android.net.Uri
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.ViewGroup
@@ -26,6 +30,7 @@ import androidx.camera.core.Preview as CameraPreview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -93,6 +98,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -2523,6 +2529,7 @@ private fun CustomerPhotosSection(
         compareByDescending<CapturedPhotoRow> { it.isPinned }.thenByDescending { it.id }
       )
     }
+  val context = LocalContext.current
   var isSelectionMode by remember(customer.id) { mutableStateOf(false) }
   var selectedPhotoIds by remember(customer.id, sortedPhotos.size) { mutableStateOf(emptySet<Long>()) }
   var photosPendingDeleteConfirmation by remember { mutableStateOf<List<CapturedPhotoRow>?>(null) }
@@ -2835,39 +2842,34 @@ private fun CustomerPhotosSection(
                   )
                 }
 
-                // Pinned Photo Badge (Top-Start)
-                if (photo.isPinned) {
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFFF59E0B),
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-                  ) {
-                    Text(
-                      text = "📌 Pinned",
-                      color = Color.Black,
-                      fontWeight = FontWeight.Bold,
-                      style = MaterialTheme.typography.labelSmall,
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                  }
+                val pinRotation by
+                  animateFloatAsState(
+                    targetValue = if (photo.isPinned) 0f else -45f,
+                    label = "pinRotation",
+                  )
+
+                // Pin Toggle Button (Top-Start) - Clean monochrome icon (straight up when pinned, angled when unpinned)
+                Box(
+                  contentAlignment = Alignment.Center,
+                  modifier =
+                    Modifier.align(Alignment.TopStart)
+                      .padding(8.dp)
+                      .size(34.dp)
+                      .clip(CircleShape)
+                      .background(Color(0x99000000))
+                      .clickable { onTogglePhotoPinned(photo.id, photo.isPinned) },
+                ) {
+                  Icon(
+                    painter = painterResource(
+                      id = if (photo.isPinned) R.drawable.ic_pin else R.drawable.ic_pin_outline
+                    ),
+                    contentDescription = if (photo.isPinned) "Unpin Photo" else "Pin Photo",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp).rotate(pinRotation),
+                  )
                 }
 
-                // Tap to view full screen badge
-                if (!isSelectionMode) {
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xCC0E2243),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
-                  ) {
-                    Text(
-                      text = "🔍 Tap to Zoom",
-                      color = Color.White,
-                      style = MaterialTheme.typography.labelSmall,
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                  }
-                }
-
+                // Share Button (Top-End) or Checkbox in selection mode
                 if (isSelectionMode) {
                   Surface(
                     shape = CircleShape,
@@ -2886,6 +2888,52 @@ private fun CustomerPhotosSection(
                           checkedColor = Color(0xFFEE4D38),
                           uncheckedColor = Color.White,
                         ),
+                    )
+                  }
+                } else {
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier =
+                      Modifier.align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x99000000))
+                        .clickable {
+                          shareJobSightPhoto(
+                            context = context,
+                            customerName = customer.name,
+                            locationLabel = matchedLoc?.label,
+                            locationAddress = matchedLoc?.address,
+                            capturedDate = formattedDate,
+                            notes = photo.notes,
+                            parts = parts,
+                            bitmapBytes = imageBytes,
+                            imageUrl = photo.imageUrl,
+                          )
+                        },
+                  ) {
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_share),
+                      contentDescription = "Share Photo",
+                      tint = Color.White,
+                      modifier = Modifier.size(18.dp),
+                    )
+                  }
+                }
+
+                // Tap to view full screen badge
+                if (!isSelectionMode) {
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xCC0E2243),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                  ) {
+                    Text(
+                      text = "🔍 Tap to Zoom",
+                      color = Color.White,
+                      style = MaterialTheme.typography.labelSmall,
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                   }
                 }
@@ -2975,63 +3023,41 @@ private fun CustomerPhotosSection(
                   )
                 }
 
-                Row(
-                  horizontalArrangement = Arrangement.spacedBy(8.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                ) {
-                  FilledTonalButton(
-                    onClick = { onTogglePhotoPinned(photo.id, photo.isPinned) },
+                if (parts.isNotEmpty()) {
+                  Button(
+                    onClick = { onShowPartsForPhoto(photo) },
                     colors =
-                      ButtonDefaults.filledTonalButtonColors(
-                        containerColor = if (photo.isPinned) Color(0xFFF59E0B) else Color(0xFF1E293B),
-                        contentColor = if (photo.isPinned) Color.Black else Color.White,
+                      ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF0F93E8),
+                        contentColor = Color.White,
                       ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.height(32.dp),
+                  ) {
+                    Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+                  }
+                } else if (photo.imageUrl.startsWith("file://")) {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1A3A6E),
                   ) {
                     Text(
-                      text = if (photo.isPinned) "📌 Pinned" else "📌 Pin",
+                      text = "Queued Offline",
+                      color = Color(0xFF56B7F7),
                       style = MaterialTheme.typography.labelSmall,
                       fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                   }
-
-                  if (parts.isNotEmpty()) {
-                    Button(
-                      onClick = { onShowPartsForPhoto(photo) },
-                      colors =
-                        ButtonDefaults.buttonColors(
-                          containerColor = Color(0xFF0F93E8),
-                          contentColor = Color.White,
-                        ),
-                    ) {
-                      Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
-                    }
-                  } else if (photo.imageUrl.startsWith("file://")) {
-                    Surface(
-                      shape = RoundedCornerShape(8.dp),
-                      color = Color(0xFF1A3A6E),
-                    ) {
-                      Text(
-                        text = "Queued Offline",
-                        color = Color(0xFF56B7F7),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                      )
-                    }
-                  } else {
-                    Surface(
-                      shape = RoundedCornerShape(8.dp),
-                      color = Color(0xFF334155),
-                    ) {
-                      Text(
-                        text = "Pending AI ID",
-                        color = Color(0xFFCBD5E1),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                      )
-                    }
+                } else {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF334155),
+                  ) {
+                    Text(
+                      text = "Pending AI ID",
+                      color = Color(0xFFCBD5E1),
+                      style = MaterialTheme.typography.labelSmall,
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
                   }
                 }
               }
@@ -3149,6 +3175,7 @@ private fun FullScreenPhotoViewerDialog(
   var currentNote by remember(photo.id, photo.notes) { mutableStateOf(photo.notes) }
   var currentPinned by remember(photo.id, photo.isPinned) { mutableStateOf(photo.isPinned) }
   var showNoteDialog by remember { mutableStateOf(false) }
+  val context = LocalContext.current
 
   val imageBitmap =
     remember(bitmapBytes) {
@@ -3275,27 +3302,64 @@ private fun FullScreenPhotoViewerDialog(
             }
 
             Row(
-              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              FilledTonalButton(
-                onClick = {
-                  val nextPinned = !currentPinned
-                  currentPinned = nextPinned
-                  onTogglePhotoPinned?.invoke(photo.id, !nextPinned)
-                },
-                colors =
-                  ButtonDefaults.filledTonalButtonColors(
-                    containerColor = if (currentPinned) Color(0xFFF59E0B) else Color(0xFF1E293B),
-                    contentColor = if (currentPinned) Color.Black else Color.White,
-                  ),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                modifier = Modifier.height(34.dp),
+              val pinRotation by
+                animateFloatAsState(
+                  targetValue = if (currentPinned) 0f else -45f,
+                  label = "dialogPinRotation",
+                )
+
+              // Pin Icon (no color, straight up when pinned, angled when unpinned)
+              Box(
+                contentAlignment = Alignment.Center,
+                modifier =
+                  Modifier.size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x26FFFFFF))
+                    .clickable {
+                      val nextPinned = !currentPinned
+                      currentPinned = nextPinned
+                      onTogglePhotoPinned?.invoke(photo.id, !nextPinned)
+                    },
               ) {
-                Text(
-                  text = if (currentPinned) "📌 Pinned" else "📌 Pin",
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
+                Icon(
+                  painter = painterResource(
+                    id = if (currentPinned) R.drawable.ic_pin else R.drawable.ic_pin_outline
+                  ),
+                  contentDescription = if (currentPinned) "Unpin" else "Pin",
+                  tint = Color.White,
+                  modifier = Modifier.size(19.dp).rotate(pinRotation),
+                )
+              }
+
+              // Share Icon (no color)
+              Box(
+                contentAlignment = Alignment.Center,
+                modifier =
+                  Modifier.size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x26FFFFFF))
+                    .clickable {
+                      shareJobSightPhoto(
+                        context = context,
+                        customerName = customer.name,
+                        locationLabel = matchedLoc?.label,
+                        locationAddress = matchedLoc?.address,
+                        capturedDate = formattedDate,
+                        notes = currentNote,
+                        parts = parts,
+                        bitmapBytes = bitmapBytes,
+                        imageUrl = photo.imageUrl,
+                      )
+                    },
+              ) {
+                Icon(
+                  painter = painterResource(id = R.drawable.ic_share),
+                  contentDescription = "Share Photo",
+                  tint = Color.White,
+                  modifier = Modifier.size(19.dp),
                 )
               }
 
@@ -4421,6 +4485,7 @@ private fun AiPartAnalysisBottomSheet(
   onClose: () -> Unit,
 ) {
   var partPendingSiteSelection by remember { mutableStateOf<HvacPartAnalysis?>(null) }
+  val context = LocalContext.current
 
   Column(
     modifier =
@@ -4444,7 +4509,7 @@ private fun AiPartAnalysisBottomSheet(
         Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
       }
       Column(
-        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Text(
@@ -4486,23 +4551,63 @@ private fun AiPartAnalysisBottomSheet(
               color = Color.White,
             )
             if (!part.modelNumber.isNullOrBlank()) {
-              Text(
-                text = "Model / Part #: ${part.modelNumber}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF34D399),
-              )
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFF0F291E),
+                modifier =
+                  Modifier.clickable {
+                    copyTextToClipboard(context, "Model Number", part.modelNumber)
+                  },
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                  Text(
+                    text = "Model / Part #: ${part.modelNumber}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF34D399),
+                  )
+                  Text("📋", style = MaterialTheme.typography.bodySmall)
+                }
+              }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Button(
-              onClick = { partPendingSiteSelection = part },
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
               modifier = Modifier.fillMaxWidth(),
-              colors =
-                ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF0F93E8),
-                  contentColor = Color.White,
-                ),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically,
             ) {
-              Text("Search Online")
+              Button(
+                onClick = { partPendingSiteSelection = part },
+                modifier = Modifier.weight(1f).height(40.dp),
+                colors =
+                  ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF0F93E8),
+                    contentColor = Color.White,
+                  ),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+              ) {
+                Text("🔍 Search Online", style = MaterialTheme.typography.labelMedium)
+              }
+
+              FilledTonalButton(
+                onClick = {
+                  val textToCopy = part.modelNumber?.takeIf { it.isNotBlank() } ?: part.partName
+                  copyTextToClipboard(context, "Model / Part Number", textToCopy)
+                },
+                modifier = Modifier.height(40.dp),
+                colors =
+                  ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color(0xFF1E3A8A),
+                    contentColor = Color(0xFF38BDF8),
+                  ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+              ) {
+                Text("📋 Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+              }
             }
           }
         }
@@ -4658,5 +4763,77 @@ private fun openMapsDirections(
       context.startActivity(Intent(Intent.ACTION_VIEW, geoUri).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
     } catch (_: Exception) {}
   }
+}
+
+private fun copyTextToClipboard(context: Context, label: String, text: String) {
+  val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+  val clip = ClipData.newPlainText(label, text)
+  clipboard.setPrimaryClip(clip)
+  Toast.makeText(context, "Copied '$text' to clipboard", Toast.LENGTH_SHORT).show()
+}
+
+private fun shareJobSightPhoto(
+  context: Context,
+  customerName: String,
+  locationLabel: String?,
+  locationAddress: String?,
+  capturedDate: String,
+  notes: String?,
+  parts: List<HvacPartAnalysis>?,
+  bitmapBytes: ByteArray?,
+  imageUrl: String?,
+) {
+  val locInfo = listOfNotNull(locationLabel, locationAddress?.takeIf { it.isNotBlank() }).joinToString(" • ")
+  val reportText = buildString {
+    append("JobSight Photo & Diagnostic Report\n")
+    append("Customer: $customerName\n")
+    if (locInfo.isNotBlank()) {
+      append("Location: $locInfo\n")
+    }
+    append("Captured: $capturedDate\n")
+    if (!notes.isNullOrBlank()) {
+      append("Technician Notes: $notes\n")
+    }
+    if (!parts.isNullOrEmpty()) {
+      append("\nIdentified HVAC Components:\n")
+      parts.forEachIndexed { idx, part ->
+        append("${idx + 1}. ${part.partName}")
+        if (!part.modelNumber.isNullOrBlank()) {
+          append(" (Model/Part #: ${part.modelNumber})")
+        }
+        append("\n")
+      }
+    }
+  }.trim()
+
+  var imageContentUri: Uri? = null
+  try {
+    if (bitmapBytes != null && bitmapBytes.isNotEmpty()) {
+      val sharedDir = File(context.cacheDir, "shared_images").apply { mkdirs() }
+      val tempFile = File(sharedDir, "jobsight_share_${System.currentTimeMillis()}.jpg")
+      tempFile.writeBytes(bitmapBytes)
+      imageContentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile)
+    } else if (imageUrl != null && imageUrl.startsWith("file://")) {
+      val localFile = File(imageUrl.removePrefix("file://"))
+      if (localFile.exists()) {
+        imageContentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", localFile)
+      }
+    }
+  } catch (_: Exception) {}
+
+  val shareIntent =
+    Intent(Intent.ACTION_SEND).apply {
+      if (imageContentUri != null) {
+        type = "image/jpeg"
+        putExtra(Intent.EXTRA_STREAM, imageContentUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      } else {
+        type = "text/plain"
+      }
+      putExtra(Intent.EXTRA_SUBJECT, "JobSight - $customerName ($capturedDate)")
+      putExtra(Intent.EXTRA_TEXT, reportText)
+    }
+
+  context.startActivity(Intent.createChooser(shareIntent, "Share Photo & Report via"))
 }
 
