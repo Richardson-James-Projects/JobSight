@@ -10,6 +10,7 @@ import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.CustomerMatch
 import com.jobsight.app.data.DataRepository
 import com.jobsight.app.data.HvacPartAnalysis
+import com.jobsight.app.data.PhotoUploadOutcome
 import com.jobsight.app.data.SearchSite
 import com.jobsight.app.location.LocationTracker
 import java.io.File
@@ -100,6 +101,28 @@ class MainScreenViewModel(
   init {
     refreshCustomers()
     refreshSearchSites()
+    syncPendingOfflineUploads()
+  }
+
+  fun syncPendingOfflineUploads() {
+    viewModelScope.launch {
+      try {
+        val beforeCount = dataRepository.getPendingUploadCount()
+        if (beforeCount > 0) {
+          val remaining = dataRepository.flushPendingUploads()
+          val uploadedCount = beforeCount - remaining
+          if (uploadedCount > 0) {
+            _uiState.update {
+              it.copy(
+                statusBannerMessage =
+                  "Synced $uploadedCount offline photo(s) to cloud & cleared local temp copies",
+              )
+            }
+            _uiState.value.selectedHubCustomer?.id?.let { loadPhotosForCustomer(it) }
+          }
+        }
+      } catch (_: Exception) {}
+    }
   }
 
   fun refreshSearchSites() {
@@ -668,42 +691,63 @@ class MainScreenViewModel(
       }
 
       try {
-        val insertedRow =
-          dataRepository.uploadPhotoAndFlushCache(
-            cacheFile = cacheFile,
-            customerId = activeCust.id,
-            customerLocationId = activeLoc?.id?.takeIf { it > 0 },
-          )
+        when (
+          val outcome =
+            dataRepository.uploadPhotoOrQueueOffline(
+              cacheFile = cacheFile,
+              customerId = activeCust.id,
+              customerLocationId = activeLoc?.id?.takeIf { it > 0 },
+            )
+        ) {
+          is PhotoUploadOutcome.UploadedOnline -> {
+            val insertedRow = outcome.row
+            val updatedCustomerPhotos =
+              try {
+                dataRepository.getPhotosForCustomer(activeCust.id)
+              } catch (_: Exception) {
+                emptyList()
+              }
 
-        val updatedCustomerPhotos =
-          try {
-            dataRepository.getPhotosForCustomer(activeCust.id)
-          } catch (_: Exception) {
-            emptyList()
+            _uiState.update { state ->
+              state.copy(
+                isUploadingPhoto = false,
+                lastCapturedPhoto = insertedRow,
+                isAwaitingAiAnalysis = true,
+                detectedParts = emptyList(),
+                customerPhotos =
+                  if (state.selectedHubCustomerId == activeCust.id && updatedCustomerPhotos.isNotEmpty()) {
+                    updatedCustomerPhotos
+                  } else {
+                    state.customerPhotos
+                  },
+                statusBannerMessage =
+                  "Saved photo to $taggedCustomerName$taggedLocationLabel. Waiting for AI...",
+              )
+            }
+
+            if (_uiState.value.selectedHubCustomerId == activeCust.id) {
+              loadPhotosForCustomer(activeCust.id)
+            }
+
+            // Also flush any older offline photos now that connection is active
+            syncPendingOfflineUploads()
+            subscribeToPhotoAiAnalysis(insertedRow.id)
           }
 
-        _uiState.update { state ->
-          state.copy(
-            isUploadingPhoto = false,
-            lastCapturedPhoto = insertedRow,
-            isAwaitingAiAnalysis = true,
-            detectedParts = emptyList(),
-            customerPhotos =
-              if (state.selectedHubCustomerId == activeCust.id && updatedCustomerPhotos.isNotEmpty()) {
-                updatedCustomerPhotos
-              } else {
-                state.customerPhotos
-              },
-            statusBannerMessage =
-              "Saved photo to $taggedCustomerName$taggedLocationLabel. Waiting for AI...",
-          )
+          is PhotoUploadOutcome.QueuedOffline -> {
+            _uiState.update {
+              it.copy(
+                isUploadingPhoto = false,
+                isAwaitingAiAnalysis = false,
+                statusBannerMessage =
+                  "Offline: Photo queued locally (${outcome.queuedCount} pending). Will auto-upload & delete local copy when connected.",
+              )
+            }
+            if (_uiState.value.selectedHubCustomerId == activeCust.id) {
+              loadPhotosForCustomer(activeCust.id)
+            }
+          }
         }
-
-        if (_uiState.value.selectedHubCustomerId == activeCust.id) {
-          loadPhotosForCustomer(activeCust.id)
-        }
-
-        subscribeToPhotoAiAnalysis(insertedRow.id)
       } catch (e: Exception) {
         _uiState.update {
           it.copy(

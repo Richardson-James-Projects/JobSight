@@ -121,6 +121,15 @@ data class CreateSearchSiteRequest(
   @SerialName("url_template") val urlTemplate: String,
 )
 
+@Serializable
+data class QueuedPhotoUpload(
+  val id: Long,
+  val localFilePath: String,
+  val customerId: Long?,
+  val customerLocationId: Long?,
+  val capturedAt: String,
+)
+
 data class ResolvedAddress(
   val formattedAddress: String,
   val latitude: Double,

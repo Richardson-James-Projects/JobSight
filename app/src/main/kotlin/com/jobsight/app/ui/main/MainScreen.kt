@@ -111,9 +111,11 @@ import kotlinx.coroutines.delay
 fun MainScreen(
   onItemClick: (NavKey) -> Unit,
   modifier: Modifier = Modifier,
-  viewModel: MainScreenViewModel = viewModel { MainScreenViewModel(DefaultDataRepository()) },
 ) {
   val context = LocalContext.current
+  val viewModel: MainScreenViewModel = viewModel {
+    MainScreenViewModel(DefaultDataRepository(context.applicationContext))
+  }
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
   var hasCameraPermission by remember {
@@ -1990,6 +1992,19 @@ private fun CustomerPhotosSection(
                     ),
                 ) {
                   Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+                }
+              } else if (photo.imageUrl.startsWith("file://")) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color(0xFF1A3A6E),
+                ) {
+                  Text(
+                    text = "Queued Offline",
+                    color = Color(0xFF56B7F7),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  )
                 }
               } else {
                 Surface(

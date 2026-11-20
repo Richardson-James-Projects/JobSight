@@ -1,9 +1,14 @@
 package com.jobsight.app.data
 
+import android.content.Context
 import com.jobsight.app.BuildConfig
 import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -12,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -30,6 +37,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+
+sealed interface PhotoUploadOutcome {
+  data class UploadedOnline(val row: CapturedPhotoRow) : PhotoUploadOutcome
+  data class QueuedOffline(val queuedCount: Int) : PhotoUploadOutcome
+}
 
 interface DataRepository {
   suspend fun getCustomers(): List<Customer>
@@ -54,18 +66,23 @@ interface DataRepository {
   suspend fun addSearchSite(name: String, urlTemplate: String): SearchSite
   suspend fun deleteSearchSite(siteId: Long)
 
-  suspend fun uploadPhotoAndFlushCache(
+  suspend fun uploadPhotoOrQueueOffline(
     cacheFile: File,
     customerId: Long?,
     customerLocationId: Long? = null,
-  ): CapturedPhotoRow
+  ): PhotoUploadOutcome
+
+  suspend fun flushPendingUploads(): Int
+  suspend fun getPendingUploadCount(): Int
 
   fun observeAiAnalysis(photoId: Long): Flow<List<HvacPartAnalysis>>
 
   suspend fun populateDemoAiAnalysis(photoId: Long): List<HvacPartAnalysis>
 }
 
-class DefaultDataRepository : DataRepository {
+class DefaultDataRepository(
+  private val appContext: Context? = null,
+) : DataRepository {
   private val supabaseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
   private val apiKey = BuildConfig.SUPABASE_ANON_KEY
   private val storageBucket = "job_site_photos"
@@ -77,11 +94,27 @@ class DefaultDataRepository : DataRepository {
 
   private val httpClient =
     OkHttpClient.Builder()
-      .connectTimeout(20, TimeUnit.SECONDS)
-      .readTimeout(30, TimeUnit.SECONDS)
-      .writeTimeout(30, TimeUnit.SECONDS)
+      .connectTimeout(15, TimeUnit.SECONDS)
+      .readTimeout(25, TimeUnit.SECONDS)
+      .writeTimeout(25, TimeUnit.SECONDS)
       .pingInterval(25, TimeUnit.SECONDS)
       .build()
+
+  private val pendingDir: File?
+    get() = appContext?.filesDir?.let { File(it, "pending_photo_uploads").apply { mkdirs() } }
+
+  private val queueManifestFile: File?
+    get() = appContext?.filesDir?.let { File(it, "pending_photo_queue.json") }
+
+  private val customersCacheFile: File?
+    get() = appContext?.filesDir?.let { File(it, "cached_customers.json") }
+
+  private val searchSitesCacheFile: File?
+    get() = appContext?.filesDir?.let { File(it, "cached_search_sites.json") }
+
+  companion object {
+    private val queueMutex = Mutex()
+  }
 
   override suspend fun getCustomers(): List<Customer> =
     withContext(Dispatchers.IO) {
@@ -95,12 +128,31 @@ class DefaultDataRepository : DataRepository {
           .get()
           .build()
 
-      httpClient.newCall(request).execute().use { response ->
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          throw IOException("Failed to fetch customers (${response.code}): $body")
+      try {
+        httpClient.newCall(request).execute().use { response ->
+          val body = response.body?.string().orEmpty()
+          if (!response.isSuccessful) {
+            throw IOException("Failed to fetch customers (${response.code}): $body")
+          }
+          val customers = json.decodeFromString<List<Customer>>(body)
+          // Save offline cache of customers & locations
+          try {
+            customersCacheFile?.writeText(body)
+          } catch (_: Exception) {}
+          customers
         }
-        json.decodeFromString<List<Customer>>(body)
+      } catch (e: Exception) {
+        // Fallback to local cached customers when offline!
+        val cachedText =
+          try {
+            customersCacheFile?.takeIf { it.exists() }?.readText()
+          } catch (_: Exception) {
+            null
+          }
+        if (!cachedText.isNullOrBlank()) {
+          return@withContext json.decodeFromString<List<Customer>>(cachedText)
+        }
+        throw e
       }
     }
 
@@ -234,9 +286,7 @@ class DefaultDataRepository : DataRepository {
             }
           }
         }
-      } catch (_: Exception) {
-        // Fall back to saving the user's entered address text even if geocoder is offline or unrecognized
-      }
+      } catch (_: Exception) {}
 
       ResolvedAddress(
         formattedAddress = trimmed,
@@ -247,6 +297,21 @@ class DefaultDataRepository : DataRepository {
 
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> =
     withContext(Dispatchers.IO) {
+      // Also include any locally queued offline photos for this customer at the top!
+      val localQueuedRows =
+        readQueueManifest()
+          .filter { it.customerId == customerId && File(it.localFilePath).exists() }
+          .map { queued ->
+            CapturedPhotoRow(
+              id = queued.id,
+              customerId = queued.customerId,
+              customerLocationId = queued.customerLocationId,
+              imageUrl = "file://${queued.localFilePath}",
+              capturedAt = "${queued.capturedAt} (Queued Offline)",
+              aiAnalysisJson = null,
+            )
+          }
+
       val request =
         Request.Builder()
           .url(
@@ -257,52 +322,74 @@ class DefaultDataRepository : DataRepository {
           .get()
           .build()
 
-      httpClient.newCall(request).execute().use { response ->
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          throw IOException("Failed to fetch photos (${response.code}): $body")
+      val remoteRows =
+        try {
+          httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+              throw IOException("Failed to fetch photos (${response.code}): $body")
+            }
+            json.decodeFromString<List<CapturedPhotoRow>>(body).sortedByDescending { it.id }
+          }
+        } catch (_: Exception) {
+          emptyList()
         }
-        json.decodeFromString<List<CapturedPhotoRow>>(body).sortedByDescending { it.id }
-      }
+
+      localQueuedRows + remoteRows
     }
 
   override suspend fun deletePhotos(photos: List<CapturedPhotoRow>) =
     withContext(Dispatchers.IO) {
       if (photos.isEmpty()) return@withContext
-      val idsCsv = photos.joinToString(",") { it.id.toString() }
 
-      // 1. Delete rows from public.captured_photos in a single batch query
-      val dbDeleteRequest =
-        Request.Builder()
-          .url("$supabaseUrl/rest/v1/captured_photos?id=in.($idsCsv)")
-          .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
-          .delete()
-          .build()
+      // 1. Separate any locally queued offline photos vs remote Supabase photos
+      val (localPhotos, remotePhotos) = photos.partition { it.imageUrl.startsWith("file://") }
 
-      httpClient.newCall(dbDeleteRequest).execute().use { response ->
-        if (!response.isSuccessful) {
-          val body = response.body?.string().orEmpty()
-          throw IOException("Failed to delete photos (${response.code}): $body")
+      if (localPhotos.isNotEmpty()) {
+        queueMutex.withLock {
+          val localIds = localPhotos.map { it.id }.toSet()
+          val currentQueue = readQueueManifest()
+          currentQueue
+            .filter { it.id in localIds }
+            .forEach { item ->
+              val f = File(item.localFilePath)
+              if (f.exists()) f.delete()
+            }
+          writeQueueManifest(currentQueue.filterNot { it.id in localIds })
         }
       }
 
-      // 2. Best-effort delete corresponding files from job_site_photos storage bucket
-      val publicPrefix = "$supabaseUrl/storage/v1/object/public/$storageBucket/"
-      for (photo in photos) {
-        if (photo.imageUrl.startsWith(publicPrefix)) {
-          val objectPath = photo.imageUrl.removePrefix(publicPrefix)
-          try {
-            val storageDeleteReq =
-              Request.Builder()
-                .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
-                .header("apikey", apiKey)
-                .header("Authorization", "Bearer $apiKey")
-                .delete()
-                .build()
-            httpClient.newCall(storageDeleteReq).execute().close()
-          } catch (_: Exception) {
-            // Ignore individual storage cleanup errors
+      if (remotePhotos.isNotEmpty()) {
+        val idsCsv = remotePhotos.joinToString(",") { it.id.toString() }
+        val dbDeleteRequest =
+          Request.Builder()
+            .url("$supabaseUrl/rest/v1/captured_photos?id=in.($idsCsv)")
+            .header("apikey", apiKey)
+            .header("Authorization", "Bearer $apiKey")
+            .delete()
+            .build()
+
+        httpClient.newCall(dbDeleteRequest).execute().use { response ->
+          if (!response.isSuccessful) {
+            val body = response.body?.string().orEmpty()
+            throw IOException("Failed to delete photos (${response.code}): $body")
+          }
+        }
+
+        val publicPrefix = "$supabaseUrl/storage/v1/object/public/$storageBucket/"
+        for (photo in remotePhotos) {
+          if (photo.imageUrl.startsWith(publicPrefix)) {
+            val objectPath = photo.imageUrl.removePrefix(publicPrefix)
+            try {
+              val storageDeleteReq =
+                Request.Builder()
+                  .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
+                  .header("apikey", apiKey)
+                  .header("Authorization", "Bearer $apiKey")
+                  .delete()
+                  .build()
+              httpClient.newCall(storageDeleteReq).execute().close()
+            } catch (_: Exception) {}
           }
         }
       }
@@ -311,6 +398,10 @@ class DefaultDataRepository : DataRepository {
   override suspend fun downloadImageBytes(imageUrl: String): ByteArray? =
     withContext(Dispatchers.IO) {
       try {
+        if (imageUrl.startsWith("file://")) {
+          val localFile = File(imageUrl.removePrefix("file://"))
+          return@withContext if (localFile.exists()) localFile.readBytes() else null
+        }
         val request = Request.Builder().url(imageUrl).get().build()
         httpClient.newCall(request).execute().use { response ->
           if (!response.isSuccessful) return@withContext null
@@ -331,13 +422,29 @@ class DefaultDataRepository : DataRepository {
           .get()
           .build()
 
-      httpClient.newCall(request).execute().use { response ->
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) {
-          throw IOException("Failed to fetch search sites (${response.code}): $body")
+      try {
+        httpClient.newCall(request).execute().use { response ->
+          val body = response.body?.string().orEmpty()
+          if (!response.isSuccessful) {
+            throw IOException("Failed to fetch search sites (${response.code}): $body")
+          }
+          val list = json.decodeFromString<List<SearchSite>>(body)
+          try {
+            searchSitesCacheFile?.writeText(body)
+          } catch (_: Exception) {}
+          list.ifEmpty { SearchSite.DEFAULT_SITES }
         }
-        val list = json.decodeFromString<List<SearchSite>>(body)
-        list.ifEmpty { SearchSite.DEFAULT_SITES }
+      } catch (_: Exception) {
+        val cachedText =
+          try {
+            searchSitesCacheFile?.takeIf { it.exists() }?.readText()
+          } catch (_: Exception) {
+            null
+          }
+        if (!cachedText.isNullOrBlank()) {
+          return@withContext json.decodeFromString<List<SearchSite>>(cachedText)
+        }
+        SearchSite.DEFAULT_SITES
       }
     }
 
@@ -398,103 +505,198 @@ class DefaultDataRepository : DataRepository {
       }
     }
 
-  override suspend fun uploadPhotoAndFlushCache(
+  override suspend fun uploadPhotoOrQueueOffline(
     cacheFile: File,
     customerId: Long?,
     customerLocationId: Long?,
-  ): CapturedPhotoRow =
+  ): PhotoUploadOutcome =
     withContext(Dispatchers.IO) {
+      if (!cacheFile.exists()) {
+        throw IOException("Cached photo file does not exist")
+      }
+
       try {
-        if (!cacheFile.exists()) {
-          throw IOException("Cached photo file does not exist")
-        }
-
-        val folder = customerId?.let { "customer_$it" } ?: "untagged"
-        val objectPath = "$folder/${System.currentTimeMillis()}_${cacheFile.name}"
-
-        // 1. Upload image to Supabase Storage bucket 'job_site_photos'
-        val uploadRequest =
-          Request.Builder()
-            .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
-            .header("apikey", apiKey)
-            .header("Authorization", "Bearer $apiKey")
-            .header("x-upsert", "true")
-            .post(cacheFile.asRequestBody("image/jpeg".toMediaType()))
-            .build()
-
-        httpClient.newCall(uploadRequest).execute().use { uploadResponse ->
-          if (!uploadResponse.isSuccessful) {
-            val err = uploadResponse.body?.string().orEmpty()
-            throw IOException("Storage upload failed (${uploadResponse.code}): $err")
-          }
-        }
-
-        val publicImageUrl = "$supabaseUrl/storage/v1/object/public/$storageBucket/$objectPath"
-
-        // 2. Insert database row in 'captured_photos' linking image_url to customer_id & customer_location_id
-        val insertBody =
-          json.encodeToString(
-            CapturedPhotoInsert(
-              customerId = customerId,
-              customerLocationId = customerLocationId,
-              imageUrl = publicImageUrl,
-            )
-          )
-
-        val insertRequest =
-          Request.Builder()
-            .url("$supabaseUrl/rest/v1/captured_photos")
-            .header("apikey", apiKey)
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=representation")
-            .post(insertBody.toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val insertedPhoto =
-          httpClient.newCall(insertRequest).execute().use { insertResponse ->
-            val body = insertResponse.body?.string().orEmpty()
-            if (!insertResponse.isSuccessful) {
-              throw IOException("Database insert failed (${insertResponse.code}): $body")
-            }
-            json.decodeFromString<List<CapturedPhotoRow>>(body).first()
-          }
-
-        // Trigger the Supabase Edge Function 'analyze-job-photo' asynchronously
-        try {
-          val fnPayload =
-            buildJsonObject {
-              put("photo_id", insertedPhoto.id)
-              put("image_url", insertedPhoto.imageUrl)
-            }
-          val fnRequest =
-            Request.Builder()
-              .url("$supabaseUrl/functions/v1/analyze-job-photo")
-              .header("apikey", apiKey)
-              .header("Authorization", "Bearer $apiKey")
-              .header("Content-Type", "application/json")
-              .post(fnPayload.toString().toRequestBody("application/json".toMediaType()))
-              .build()
-          httpClient.newCall(fnRequest).enqueue(
-            object : okhttp3.Callback {
-              override fun onFailure(call: okhttp3.Call, e: IOException) {}
-              override fun onResponse(call: okhttp3.Call, response: Response) {
-                response.close()
-              }
-            }
-          )
-        } catch (_: Exception) {
-          // Database trigger (pg_net) also invokes the Edge Function on INSERT
-        }
-
-        insertedPhoto
-      } finally {
-        // 3. Flush local cache immediately per architecture plan
+        val insertedPhoto = uploadSingleFileToSupabase(cacheFile, customerId, customerLocationId)
+        // Upload succeeded online -> delete local copy immediately!
         if (cacheFile.exists()) {
           cacheFile.delete()
         }
+        PhotoUploadOutcome.UploadedOnline(insertedPhoto)
+      } catch (_: IOException) {
+        // Offline or network failure -> move photo into persistent offline queue & schedule WorkManager!
+        val queuedCount = enqueueFileForOfflineUpload(cacheFile, customerId, customerLocationId)
+        appContext?.let { PhotoUploadWorker.enqueueWhenConnected(it) }
+        PhotoUploadOutcome.QueuedOffline(queuedCount)
       }
     }
+
+  private fun uploadSingleFileToSupabase(
+    file: File,
+    customerId: Long?,
+    customerLocationId: Long?,
+  ): CapturedPhotoRow {
+    val folder = customerId?.let { "customer_$it" } ?: "untagged"
+    val objectPath = "$folder/${System.currentTimeMillis()}_${file.name}"
+
+    val uploadRequest =
+      Request.Builder()
+        .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
+        .header("apikey", apiKey)
+        .header("Authorization", "Bearer $apiKey")
+        .header("x-upsert", "true")
+        .post(file.asRequestBody("image/jpeg".toMediaType()))
+        .build()
+
+    httpClient.newCall(uploadRequest).execute().use { uploadResponse ->
+      if (!uploadResponse.isSuccessful) {
+        val err = uploadResponse.body?.string().orEmpty()
+        throw IOException("Storage upload failed (${uploadResponse.code}): $err")
+      }
+    }
+
+    val publicImageUrl = "$supabaseUrl/storage/v1/object/public/$storageBucket/$objectPath"
+
+    val insertBody =
+      json.encodeToString(
+        CapturedPhotoInsert(
+          customerId = customerId,
+          customerLocationId = customerLocationId,
+          imageUrl = publicImageUrl,
+        )
+      )
+
+    val insertRequest =
+      Request.Builder()
+        .url("$supabaseUrl/rest/v1/captured_photos")
+        .header("apikey", apiKey)
+        .header("Authorization", "Bearer $apiKey")
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .post(insertBody.toRequestBody("application/json".toMediaType()))
+        .build()
+
+    val insertedPhoto =
+      httpClient.newCall(insertRequest).execute().use { insertResponse ->
+        val body = insertResponse.body?.string().orEmpty()
+        if (!insertResponse.isSuccessful) {
+          throw IOException("Database insert failed (${insertResponse.code}): $body")
+        }
+        json.decodeFromString<List<CapturedPhotoRow>>(body).first()
+      }
+
+    // Trigger the Supabase Edge Function 'analyze-job-photo' asynchronously
+    try {
+      val fnPayload =
+        buildJsonObject {
+          put("photo_id", insertedPhoto.id)
+          put("image_url", insertedPhoto.imageUrl)
+        }
+      val fnRequest =
+        Request.Builder()
+          .url("$supabaseUrl/functions/v1/analyze-job-photo")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .header("Content-Type", "application/json")
+          .post(fnPayload.toString().toRequestBody("application/json".toMediaType()))
+          .build()
+      httpClient.newCall(fnRequest).enqueue(
+        object : okhttp3.Callback {
+          override fun onFailure(call: okhttp3.Call, e: IOException) {}
+          override fun onResponse(call: okhttp3.Call, response: Response) {
+            response.close()
+          }
+        }
+      )
+    } catch (_: Exception) {}
+
+    return insertedPhoto
+  }
+
+  private suspend fun enqueueFileForOfflineUpload(
+    cacheFile: File,
+    customerId: Long?,
+    customerLocationId: Long?,
+  ): Int =
+    queueMutex.withLock {
+      val dir = pendingDir ?: cacheFile.parentFile ?: File(".")
+      val destFile = File(dir, "queued_${System.currentTimeMillis()}_${cacheFile.name}")
+      if (cacheFile.absolutePath != destFile.absolutePath) {
+        cacheFile.copyTo(destFile, overwrite = true)
+        cacheFile.delete()
+      }
+
+      val isoFormat =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+          timeZone = TimeZone.getTimeZone("UTC")
+        }
+      val entry =
+        QueuedPhotoUpload(
+          id = System.currentTimeMillis(),
+          localFilePath = destFile.absolutePath,
+          customerId = customerId,
+          customerLocationId = customerLocationId,
+          capturedAt = isoFormat.format(Date()),
+        )
+
+      val updatedQueue = readQueueManifest() + entry
+      writeQueueManifest(updatedQueue)
+      updatedQueue.size
+    }
+
+  override suspend fun flushPendingUploads(): Int =
+    withContext(Dispatchers.IO) {
+      queueMutex.withLock {
+        val currentQueue = readQueueManifest()
+        if (currentQueue.isEmpty()) return@withLock 0
+
+        val remaining = mutableListOf<QueuedPhotoUpload>()
+        for (item in currentQueue) {
+          val file = File(item.localFilePath)
+          if (!file.exists()) {
+            continue
+          }
+          try {
+            uploadSingleFileToSupabase(
+              file = file,
+              customerId = item.customerId,
+              customerLocationId = item.customerLocationId,
+            )
+            // Uploaded successfully -> delete local copy immediately!
+            file.delete()
+          } catch (_: Exception) {
+            remaining.add(item)
+          }
+        }
+        writeQueueManifest(remaining)
+        remaining.size
+      }
+    }
+
+  override suspend fun getPendingUploadCount(): Int =
+    withContext(Dispatchers.IO) {
+      queueMutex.withLock {
+        val valid = readQueueManifest().filter { File(it.localFilePath).exists() }
+        writeQueueManifest(valid)
+        valid.size
+      }
+    }
+
+  private fun readQueueManifest(): List<QueuedPhotoUpload> {
+    val file = queueManifestFile ?: return emptyList()
+    if (!file.exists()) return emptyList()
+    return try {
+      json.decodeFromString<List<QueuedPhotoUpload>>(file.readText())
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  private fun writeQueueManifest(items: List<QueuedPhotoUpload>) {
+    val file = queueManifestFile ?: return
+    try {
+      file.writeText(json.encodeToString(items))
+    } catch (_: Exception) {}
+  }
 
   override fun observeAiAnalysis(photoId: Long): Flow<List<HvacPartAnalysis>> = callbackFlow {
     val wsUrl =
@@ -550,9 +752,7 @@ class DefaultDataRepository : DataRepository {
               if (parts.isNotEmpty()) {
                 trySend(parts)
               }
-            } catch (_: Exception) {
-              // Ignore non-matching realtime frames
-            }
+            } catch (_: Exception) {}
           }
         }
       )
@@ -567,9 +767,7 @@ class DefaultDataRepository : DataRepository {
               trySend(parts)
               break
             }
-          } catch (_: Exception) {
-            // Continue polling while waiting for Edge Function
-          }
+          } catch (_: Exception) {}
           delay(2500L)
         }
       }
@@ -598,49 +796,5 @@ class DefaultDataRepository : DataRepository {
     }
   }
 
-  override suspend fun populateDemoAiAnalysis(photoId: Long): List<HvacPartAnalysis> =
-    withContext(Dispatchers.IO) {
-      val demoParts =
-        listOf(
-          HvacPartAnalysis(
-            partName = "Carrier Condenser Contactor (2-Pole 30A 24V)",
-            modelNumber = "HN52KC024",
-            searchQuery = "Carrier HN52KC024 2-pole 30A 24V contactor replacement",
-          ),
-          HvacPartAnalysis(
-            partName = "Turbo200 Dual Run Capacitor (45/5 MFD 440V)",
-            modelNumber = "CPT00668",
-            searchQuery = "45/5 MFD 440V dual run HVAC capacitor replacement",
-          ),
-        )
-
-      val updatePayload =
-        buildJsonObject {
-          put(
-            "ai_analysis_json",
-            json.encodeToJsonElement(
-              kotlinx.serialization.builtins.ListSerializer(HvacPartAnalysis.serializer()),
-              demoParts,
-            ),
-          )
-        }
-
-      val request =
-        Request.Builder()
-          .url("$supabaseUrl/rest/v1/captured_photos?id=eq.$photoId")
-          .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
-          .header("Content-Type", "application/json")
-          .header("Prefer", "return=representation")
-          .patch(updatePayload.toString().toRequestBody("application/json".toMediaType()))
-          .build()
-
-      httpClient.newCall(request).execute().use { response ->
-        if (!response.isSuccessful) {
-          val err = response.body?.string().orEmpty()
-          throw IOException("Failed to update ai_analysis_json (${response.code}): $err")
-        }
-      }
-      demoParts
-    }
+  override suspend fun populateDemoAiAnalysis(photoId: Long): List<HvacPartAnalysis> = emptyList()
 }

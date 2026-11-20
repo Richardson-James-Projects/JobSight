@@ -7,6 +7,7 @@ import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.CustomerMatch
 import com.jobsight.app.data.DataRepository
 import com.jobsight.app.data.HvacPartAnalysis
+import com.jobsight.app.data.PhotoUploadOutcome
 import com.jobsight.app.data.ResolvedAddress
 import com.jobsight.app.data.SearchSite
 import java.io.File
@@ -175,17 +176,23 @@ private class FakeJobSightRepository : DataRepository {
 
   override suspend fun deleteSearchSite(siteId: Long) {}
 
-  override suspend fun uploadPhotoAndFlushCache(
+  override suspend fun uploadPhotoOrQueueOffline(
     cacheFile: File,
     customerId: Long?,
     customerLocationId: Long?,
-  ): CapturedPhotoRow =
-    CapturedPhotoRow(
-      id = 99L,
-      customerId = customerId,
-      customerLocationId = customerLocationId,
-      imageUrl = "https://example.com/photo.jpg",
+  ): PhotoUploadOutcome =
+    PhotoUploadOutcome.UploadedOnline(
+      CapturedPhotoRow(
+        id = 99L,
+        customerId = customerId,
+        customerLocationId = customerLocationId,
+        imageUrl = "https://example.com/photo.jpg",
+      )
     )
+
+  override suspend fun flushPendingUploads(): Int = 0
+
+  override suspend fun getPendingUploadCount(): Int = 0
 
   override fun observeAiAnalysis(photoId: Long): Flow<List<HvacPartAnalysis>> =
     flowOf(

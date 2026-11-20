@@ -84,6 +84,7 @@ dependencies {
   // Networking & Serialization (Supabase REST, Storage, Realtime)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
+  implementation(libs.androidx.work.runtime.ktx)
 
   // Local tests
   testImplementation(libs.junit)
