@@ -1,0 +1,1482 @@
+package com.jobsight.app.ui.main
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.location.Location
+import android.net.Uri
+import android.view.ViewGroup
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview as CameraPreview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation3.runtime.NavKey
+import com.jobsight.app.data.AnalysisJsonParser
+import com.jobsight.app.data.CapturedPhotoRow
+import com.jobsight.app.data.Customer
+import com.jobsight.app.data.CustomerLocation
+import com.jobsight.app.data.DefaultDataRepository
+import com.jobsight.app.data.HvacPartAnalysis
+import com.jobsight.app.location.LocationTracker
+import java.io.File
+import kotlin.math.roundToInt
+
+@Composable
+fun MainScreen(
+  onItemClick: (NavKey) -> Unit,
+  modifier: Modifier = Modifier,
+  viewModel: MainScreenViewModel = viewModel { MainScreenViewModel(DefaultDataRepository()) },
+) {
+  val context = LocalContext.current
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+  var hasCameraPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+        PackageManager.PERMISSION_GRANTED
+    )
+  }
+  var hasLocationPermission by remember {
+    mutableStateOf(
+      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
+    )
+  }
+
+  val permissionLauncher =
+    rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+      hasCameraPermission = result[Manifest.permission.CAMERA] == true || hasCameraPermission
+      hasLocationPermission =
+        result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+          result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+          hasLocationPermission
+    }
+
+  LaunchedEffect(Unit) {
+    if (!hasCameraPermission || !hasLocationPermission) {
+      permissionLauncher.launch(
+        arrayOf(
+          Manifest.permission.CAMERA,
+          Manifest.permission.ACCESS_FINE_LOCATION,
+          Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+      )
+    }
+  }
+
+  LaunchedEffect(hasLocationPermission) {
+    if (hasLocationPermission) {
+      val tracker = LocationTracker(context)
+      tracker.getInitialLocation()?.let { viewModel.onLocationUpdated(it) }
+      tracker.observeLocationUpdates().collect { location ->
+        viewModel.onLocationUpdated(location)
+      }
+    }
+  }
+
+  FieldCameraContent(
+    uiState = uiState,
+    hasCameraPermission = hasCameraPermission,
+    hasLocationPermission = hasLocationPermission,
+    onRequestPermissions = {
+      permissionLauncher.launch(
+        arrayOf(
+          Manifest.permission.CAMERA,
+          Manifest.permission.ACCESS_FINE_LOCATION,
+          Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+      )
+    },
+    onPhotoCapturedToCache = viewModel::onPhotoCapturedToCache,
+    onOpenCustomerPicker = viewModel::openCustomerPicker,
+    onCloseCustomerPicker = viewModel::closeCustomerPicker,
+    onSelectCustomerManually = viewModel::selectCustomerManually,
+    onOpenCustomerHub = viewModel::openCustomerHub,
+    onCloseCustomerHub = viewModel::closeCustomerHub,
+    onSelectHubCustomer = viewModel::selectHubCustomer,
+    onCreateCustomer = viewModel::createNewCustomer,
+    onAddLocationToCustomer = viewModel::addLocationToCustomer,
+    onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
+    onShowPartsForPhoto = viewModel::showPartsForPhoto,
+    onDismissBottomSheet = viewModel::dismissBottomSheet,
+    onReopenBottomSheet = viewModel::reopenBottomSheet,
+    onDismissError = viewModel::clearError,
+    modifier = modifier,
+  )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun FieldCameraContent(
+  uiState: FieldCameraUiState,
+  hasCameraPermission: Boolean,
+  hasLocationPermission: Boolean,
+  onRequestPermissions: () -> Unit,
+  onPhotoCapturedToCache: (File) -> Unit,
+  onOpenCustomerPicker: () -> Unit,
+  onCloseCustomerPicker: () -> Unit,
+  onSelectCustomerManually: (Long?) -> Unit,
+  onOpenCustomerHub: (Long?) -> Unit,
+  onCloseCustomerHub: () -> Unit,
+  onSelectHubCustomer: (Long) -> Unit,
+  onCreateCustomer: (String, String, Boolean, String) -> Unit,
+  onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onTriggerDemoAi: (Long?) -> Unit,
+  onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
+  onDismissBottomSheet: () -> Unit,
+  onReopenBottomSheet: () -> Unit,
+  onDismissError: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val context = LocalContext.current
+  val imageCapture = remember {
+    ImageCapture.Builder()
+      .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+      .build()
+  }
+
+  Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0F14))) {
+    // 1. Full-screen distortion-free CameraX PreviewView
+    if (hasCameraPermission) {
+      CameraXPreview(
+        imageCapture = imageCapture,
+        modifier = Modifier.fillMaxSize(),
+      )
+    } else {
+      PermissionPromptOverlay(
+        hasCameraPermission = hasCameraPermission,
+        hasLocationPermission = hasLocationPermission,
+        onRequestPermissions = onRequestPermissions,
+        modifier = Modifier.align(Alignment.Center),
+      )
+    }
+
+    // 2. Top Geofence & Customer Control HUD Overlay
+    Column(
+      modifier =
+        Modifier.fillMaxWidth()
+          .statusBarsPadding()
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      GeofenceHeaderBadge(
+        uiState = uiState,
+        hasLocationPermission = hasLocationPermission,
+        onOpenCustomerPicker = onOpenCustomerPicker,
+        onOpenCustomerHub = { onOpenCustomerHub(uiState.activeCustomer?.id) },
+        onResetToAutoGps = { onSelectCustomerManually(null) },
+      )
+
+      // Status / AI Waiting Pill
+      AnimatedVisibility(visible = uiState.statusBannerMessage != null) {
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = Color(0xCC111827),
+          tonalElevation = 4.dp,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              if (uiState.isUploadingPhoto || uiState.isAwaitingAiAnalysis) {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(18.dp),
+                  strokeWidth = 2.dp,
+                  color = Color(0xFF38BDF8),
+                )
+              }
+              Text(
+                text = uiState.statusBannerMessage.orEmpty(),
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+              )
+              if (uiState.detectedParts.isNotEmpty() && !uiState.isBottomSheetVisible) {
+                TextButton(onClick = onReopenBottomSheet) {
+                  Text("View Parts", color = Color(0xFF38BDF8))
+                }
+              }
+            }
+
+            if (uiState.isAwaitingAiAnalysis) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "Listening for Supabase ai_analysis_json update...",
+                  color = Color(0xFF9CA3AF),
+                  style = MaterialTheme.typography.labelSmall,
+                )
+                FilledTonalButton(
+                  onClick = { onTriggerDemoAi(null) },
+                  modifier = Modifier.height(30.dp),
+                ) {
+                  Text(
+                    text = "Simulate AI Result",
+                    style = MaterialTheme.typography.labelSmall,
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Error Pill
+      AnimatedVisibility(visible = uiState.errorMessage != null) {
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = Color(0xE67F1D1D),
+          modifier = Modifier.fillMaxWidth().clickable { onDismissError() },
+        ) {
+          Text(
+            text = "${uiState.errorMessage.orEmpty()} (Tap to dismiss)",
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(12.dp),
+          )
+        }
+      }
+    }
+
+    // 3. Bottom Zero-Click Shutter Bar
+    Column(
+      modifier =
+        Modifier.align(Alignment.BottomCenter)
+          .fillMaxWidth()
+          .navigationBarsPadding()
+          .padding(bottom = 28.dp, start = 24.dp, end = 24.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      ShutterButton(
+        enabled = hasCameraPermission && !uiState.isUploadingPhoto,
+        isUploading = uiState.isUploadingPhoto,
+        onClick = {
+          capturePhotoToCache(
+            context = context,
+            imageCapture = imageCapture,
+            onCaptured = onPhotoCapturedToCache,
+          )
+        },
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      val activeCustomer = uiState.activeCustomer
+      Text(
+        text =
+          when {
+            activeCustomer != null && uiState.isManualSelection ->
+              "Tagging (Manual): ${activeCustomer.name}"
+            activeCustomer != null ->
+              "Auto-tagging: ${activeCustomer.name}"
+            else ->
+              "Untagged Capture • Tap 'Switch Customer' above to tag manually"
+          },
+        color = Color.White.copy(alpha = 0.9f),
+        style = MaterialTheme.typography.labelMedium,
+      )
+    }
+  }
+
+  // 4. Customer Switcher Modal (Auto-Detect vs Manual Customer Override)
+  if (uiState.isCustomerPickerVisible) {
+    CustomerPickerDialog(
+      uiState = uiState,
+      onSelectCustomerManually = onSelectCustomerManually,
+      onManageCustomersClick = {
+        onCloseCustomerPicker()
+        onOpenCustomerHub(uiState.activeCustomer?.id)
+      },
+      onDismiss = onCloseCustomerPicker,
+    )
+  }
+
+  // 5. Full Customer Hub Sheet (Add Customers, Add Locations by Address/GPS, View Customer Photos)
+  if (uiState.isCustomerHubVisible) {
+    val hubSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+      onDismissRequest = onCloseCustomerHub,
+      sheetState = hubSheetState,
+      containerColor = Color(0xFF0F172A),
+      contentColor = Color.White,
+    ) {
+      CustomerHubBottomSheet(
+        uiState = uiState,
+        onSelectHubCustomer = onSelectHubCustomer,
+        onSetAsActiveCustomer = { customerId ->
+          onSelectCustomerManually(customerId)
+          onCloseCustomerHub()
+        },
+        onCreateCustomer = onCreateCustomer,
+        onAddLocationToCustomer = onAddLocationToCustomer,
+        onTriggerDemoAi = onTriggerDemoAi,
+        onShowPartsForPhoto = onShowPartsForPhoto,
+        onClose = onCloseCustomerHub,
+      )
+    }
+  }
+
+  // 6. AI Part Identification Bottom Sheet Card
+  if (uiState.isBottomSheetVisible && uiState.detectedParts.isNotEmpty()) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+      onDismissRequest = onDismissBottomSheet,
+      sheetState = sheetState,
+      containerColor = Color(0xFF111827),
+      contentColor = Color.White,
+    ) {
+      AiPartAnalysisBottomSheet(
+        customerName = uiState.activeCustomer?.name ?: "Job Site Capture",
+        parts = uiState.detectedParts,
+        onSearchPartOnline = { query ->
+          val searchUri =
+            Uri.parse("https://www.google.com/search?q=${Uri.encode(query)}")
+          val intent = Intent(Intent.ACTION_VIEW, searchUri)
+          context.startActivity(intent)
+        },
+        onClose = onDismissBottomSheet,
+      )
+    }
+  }
+}
+
+@Composable
+private fun GeofenceHeaderBadge(
+  uiState: FieldCameraUiState,
+  hasLocationPermission: Boolean,
+  onOpenCustomerPicker: () -> Unit,
+  onOpenCustomerHub: () -> Unit,
+  onResetToAutoGps: () -> Unit,
+) {
+  val manualCustomer = uiState.manualSelectedCustomer
+  val autoDetected = uiState.autoDetectedCustomer
+  val closest = uiState.closestMatch
+
+  val badgeBackground =
+    when {
+      manualCustomer != null -> Color(0xD91E3A8A)
+      autoDetected != null -> Color(0xD9065F46)
+      else -> Color(0xCC1F2937)
+    }
+  val borderColor =
+    when {
+      manualCustomer != null -> Color(0xFF60A5FA)
+      autoDetected != null -> Color(0xFF34D399)
+      else -> Color(0xFF4B5563)
+    }
+
+  Surface(
+    shape = RoundedCornerShape(16.dp),
+    color = badgeBackground,
+    modifier =
+      Modifier.fillMaxWidth()
+        .border(1.dp, borderColor, RoundedCornerShape(16.dp)),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text =
+              when {
+                manualCustomer != null -> "Selected: ${manualCustomer.name} (Manual)"
+                autoDetected != null -> "Detected: ${autoDetected.name}"
+                !hasLocationPermission -> "Location Permission Required"
+                uiState.currentLocation == null -> "Acquiring GPS Coordinates..."
+                closest != null ->
+                  "Outside Geofence (${closest.distanceMeters.roundToInt()}m to ${closest.customer.name})"
+                else -> "No Customers in Geofence (< 100m)"
+              },
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+          )
+          Spacer(modifier = Modifier.height(2.dp))
+          Text(
+            text =
+              when {
+                manualCustomer != null -> {
+                  val locCount = manualCustomer.locations.size
+                  val firstAddr =
+                    manualCustomer.locations.firstOrNull()?.address ?: manualCustomer.address
+                  "Manual override • $locCount location(s) • $firstAddr"
+                }
+                autoDetected != null -> {
+                  val matchedLoc = uiState.autoDetectedLocation
+                  val locLabel = matchedLoc?.label ?: "Site"
+                  val locAddr = matchedLoc?.address ?: autoDetected.address
+                  "${closest?.distanceMeters?.roundToInt() ?: 0}m away • $locLabel ($locAddr)"
+                }
+                uiState.currentLocation != null ->
+                  "GPS: ${"%.5f".format(uiState.currentLocation.latitude)}, ${"%.5f".format(uiState.currentLocation.longitude)}"
+                else -> "Waiting for FusedLocationProviderClient..."
+              },
+            color = Color(0xFFD1D5DB),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+
+      // Action buttons row: Switch Customer | Reset to Auto GPS | Customers & Photos
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        FilledTonalButton(
+          onClick = onOpenCustomerPicker,
+          colors =
+            ButtonDefaults.filledTonalButtonColors(
+              containerColor = Color(0xFF1E293B),
+              contentColor = Color.White,
+            ),
+          modifier = Modifier.height(34.dp),
+        ) {
+          Text("Switch Customer", style = MaterialTheme.typography.labelSmall)
+        }
+
+        if (manualCustomer != null) {
+          OutlinedButton(
+            onClick = onResetToAutoGps,
+            colors =
+              ButtonDefaults.outlinedButtonColors(
+                contentColor = Color(0xFF93C5FD)
+              ),
+            modifier = Modifier.height(34.dp),
+          ) {
+            Text("Use Auto GPS", style = MaterialTheme.typography.labelSmall)
+          }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+          onClick = onOpenCustomerHub,
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF0284C7),
+              contentColor = Color.White,
+            ),
+          modifier = Modifier.height(34.dp),
+        ) {
+          Text("Customers & Photos", style = MaterialTheme.typography.labelSmall)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CustomerPickerDialog(
+  uiState: FieldCameraUiState,
+  onSelectCustomerManually: (Long?) -> Unit,
+  onManageCustomersClick: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF1E293B),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = { Text("Select Active Customer", fontWeight = FontWeight.Bold) },
+    text = {
+      LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        item {
+          val isAutoMode = uiState.manualCustomerOverrideId == null
+          val autoDetectedName = uiState.autoDetectedCustomer?.name ?: "None within 100m"
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
+            modifier =
+              Modifier.fillMaxWidth()
+                .clickable { onSelectCustomerManually(null) },
+          ) {
+            Row(
+              modifier = Modifier.padding(12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              RadioButton(
+                selected = isAutoMode,
+                onClick = { onSelectCustomerManually(null) },
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Column {
+                Text(
+                  text = "Auto-Detect via GPS (< 100m)",
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                )
+                Text(
+                  text = "Currently detected: $autoDetectedName",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = Color(0xFFD1D5DB),
+                )
+              }
+            }
+          }
+        }
+
+        item {
+          HorizontalDivider(color = Color(0xFF334155), modifier = Modifier.padding(vertical = 4.dp))
+          Text(
+            text = "Or Select Customer Manually:",
+            style = MaterialTheme.typography.labelMedium,
+            color = Color(0xFF94A3B8),
+          )
+        }
+
+        items(uiState.customers) { customer ->
+          val isSelected = uiState.manualCustomerOverrideId == customer.id
+          val closestDist =
+            uiState.currentLocation?.let { deviceLoc ->
+              customer.locations
+                .map { LocationTracker.distanceBetween(deviceLoc, it.latitude, it.longitude) }
+                .minOrNull()
+            }
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+            modifier =
+              Modifier.fillMaxWidth()
+                .clickable { onSelectCustomerManually(customer.id) },
+          ) {
+            Row(
+              modifier = Modifier.padding(12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              RadioButton(
+                selected = isSelected,
+                onClick = { onSelectCustomerManually(customer.id) },
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = customer.name,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                )
+                Text(
+                  text =
+                    buildString {
+                      append("${customer.locations.size} site location(s)")
+                      if (closestDist != null) {
+                        append(" • Closest: ${closestDist.roundToInt()}m")
+                      }
+                    },
+                  style = MaterialTheme.typography.bodySmall,
+                  color = Color(0xFF94A3B8),
+                )
+              }
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onManageCustomersClick) {
+        Text("+ Add Customer / View Photos", color = Color(0xFF38BDF8))
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Close", color = Color(0xFF94A3B8))
+      }
+    },
+  )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomerHubBottomSheet(
+  uiState: FieldCameraUiState,
+  onSelectHubCustomer: (Long) -> Unit,
+  onSetAsActiveCustomer: (Long) -> Unit,
+  onCreateCustomer: (String, String, Boolean, String) -> Unit,
+  onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onTriggerDemoAi: (Long?) -> Unit,
+  onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
+  onClose: () -> Unit,
+) {
+  val selectedCustomer = uiState.selectedHubCustomer
+  var selectedTabIndex by remember { mutableIntStateOf(0) } // 0 = Photos, 1 = Locations
+  var showNewCustomerDialog by remember { mutableStateOf(false) }
+  var showAddLocationDialog by remember { mutableStateOf(false) }
+
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .fillMaxHeight(0.88f)
+        .padding(horizontal = 16.dp)
+        .padding(bottom = 24.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    // Header Row
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column {
+        Text(
+          text = "Customers, Locations & Photos",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+        )
+        Text(
+          text = "Add customers, manage site locations, or inspect captured photos",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFF94A3B8),
+        )
+      }
+      Button(
+        onClick = { showNewCustomerDialog = true },
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF10B981),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("+ Customer")
+      }
+    }
+
+    // Horizontal Customer Selector Chips
+    Row(
+      modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      uiState.customers.forEach { customer ->
+        val isSelected = selectedCustomer?.id == customer.id
+        FilterChip(
+          selected = isSelected,
+          onClick = { onSelectHubCustomer(customer.id) },
+          label = {
+            Text(
+              text = "${customer.name} (${customer.locations.size})",
+              color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+            )
+          },
+          colors =
+            FilterChipDefaults.filterChipColors(
+              selectedContainerColor = Color(0xFF0284C7),
+              containerColor = Color(0xFF1E293B),
+            ),
+        )
+      }
+    }
+
+    if (selectedCustomer != null) {
+      // Selected Customer Action Bar
+      Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1E293B),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Row(
+          modifier = Modifier.padding(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = selectedCustomer.name,
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+            )
+            Text(
+              text =
+                "${selectedCustomer.locations.size} location(s) • ${uiState.customerPhotos.size} photo(s) captured",
+              style = MaterialTheme.typography.bodySmall,
+              color = Color(0xFF94A3B8),
+            )
+          }
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = { onSetAsActiveCustomer(selectedCustomer.id) },
+              colors =
+                ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+            ) {
+              Text("Tag Camera Here", style = MaterialTheme.typography.labelSmall)
+            }
+          }
+        }
+      }
+
+      // Tabs: Photos Taken vs Site Locations
+      SecondaryTabRow(
+        selectedTabIndex = selectedTabIndex,
+        containerColor = Color(0xFF1E293B),
+        contentColor = Color.White,
+      ) {
+        Tab(
+          selected = selectedTabIndex == 0,
+          onClick = { selectedTabIndex = 0 },
+          text = { Text("Photos Taken (${uiState.customerPhotos.size})") },
+        )
+        Tab(
+          selected = selectedTabIndex == 1,
+          onClick = { selectedTabIndex = 1 },
+          text = { Text("Site Locations (${selectedCustomer.locations.size})") },
+        )
+      }
+
+      if (selectedTabIndex == 0) {
+        // Tab 0: Photos Taken by Customer
+        CustomerPhotosSection(
+          customer = selectedCustomer,
+          photos = uiState.customerPhotos,
+          isLoading = uiState.isLoadingCustomerPhotos,
+          photoBitmapsCache = uiState.photoBitmapsCache,
+          onTriggerDemoAi = onTriggerDemoAi,
+          onShowPartsForPhoto = onShowPartsForPhoto,
+          modifier = Modifier.weight(1f),
+        )
+      } else {
+        // Tab 1: Multiple Locations for Customer
+        CustomerLocationsSection(
+          customer = selectedCustomer,
+          currentLocation = uiState.currentLocation,
+          onAddLocationClick = { showAddLocationDialog = true },
+          modifier = Modifier.weight(1f),
+        )
+      }
+    }
+  }
+
+  if (showNewCustomerDialog) {
+    AddCustomerDialog(
+      hasCurrentGps = uiState.currentLocation != null,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { name, locLabel, useGps, address ->
+        showNewCustomerDialog = false
+        onCreateCustomer(name, locLabel, useGps, address)
+      },
+      onDismiss = { showNewCustomerDialog = false },
+    )
+  }
+
+  if (showAddLocationDialog && selectedCustomer != null) {
+    AddLocationDialog(
+      customerName = selectedCustomer.name,
+      currentLocation = uiState.currentLocation,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { label, useGps, address ->
+        showAddLocationDialog = false
+        onAddLocationToCustomer(selectedCustomer.id, label, useGps, address)
+      },
+      onDismiss = { showAddLocationDialog = false },
+    )
+  }
+}
+
+@Composable
+private fun CustomerPhotosSection(
+  customer: Customer,
+  photos: List<CapturedPhotoRow>,
+  isLoading: Boolean,
+  photoBitmapsCache: Map<String, ByteArray>,
+  onTriggerDemoAi: (Long?) -> Unit,
+  onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  if (isLoading) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+      CircularProgressIndicator(color = Color(0xFF38BDF8))
+    }
+    return
+  }
+
+  if (photos.isEmpty()) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+      Text(
+        text = "No photos taken for ${customer.name} yet.\nClose this sheet and press the camera shutter to capture one!",
+        color = Color(0xFF94A3B8),
+        style = MaterialTheme.typography.bodyMedium,
+      )
+    }
+    return
+  }
+
+  LazyColumn(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    items(photos, key = { it.id }) { photo ->
+      val parts = AnalysisJsonParser.parseParts(photo.aiAnalysisJson)
+      val matchedLoc = customer.locations.find { it.id == photo.customerLocationId }
+      val imageBytes = photoBitmapsCache[photo.imageUrl]
+      val imageBitmap =
+        remember(imageBytes) {
+          imageBytes?.let { bytes ->
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+          }
+        }
+
+      Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          // Photo Preview Image
+          Box(
+            modifier =
+              Modifier.fillMaxWidth()
+                .height(190.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF0B0F14)),
+            contentAlignment = Alignment.Center,
+          ) {
+            if (imageBitmap != null) {
+              Image(
+                bitmap = imageBitmap,
+                contentDescription = "Captured Photo #${photo.id}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+              )
+            } else {
+              CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = Color(0xFF38BDF8),
+                strokeWidth = 2.dp,
+              )
+            }
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text =
+                  buildString {
+                    append("Photo #${photo.id}")
+                    if (matchedLoc != null) {
+                      append(" • ${matchedLoc.label}")
+                    }
+                  },
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+              )
+              Text(
+                text = photo.capturedAt?.take(19)?.replace("T", " ") ?: "Just now",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF94A3B8),
+              )
+            }
+
+            if (parts.isNotEmpty()) {
+              Button(
+                onClick = { onShowPartsForPhoto(photo) },
+                colors =
+                  ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF059669),
+                    contentColor = Color.White,
+                  ),
+              ) {
+                Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+              }
+            } else {
+              FilledTonalButton(
+                onClick = { onTriggerDemoAi(photo.id) },
+              ) {
+                Text("Simulate AI ID", style = MaterialTheme.typography.labelSmall)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CustomerLocationsSection(
+  customer: Customer,
+  currentLocation: Location?,
+  onAddLocationClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "Saved Job Site Locations for ${customer.name}",
+        style = MaterialTheme.typography.titleSmall,
+        color = Color(0xFFCBD5E1),
+      )
+      Button(
+        onClick = onAddLocationClick,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0284C7),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("+ Add Location")
+      }
+    }
+
+    LazyColumn(
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+      modifier = Modifier.weight(1f),
+    ) {
+      items(customer.locations, key = { it.id }) { loc ->
+        val distMeters =
+          currentLocation?.let {
+            LocationTracker.distanceBetween(it, loc.latitude, loc.longitude)
+          }
+        val isInsideGeofence = distMeters != null && distMeters < 100f
+
+        Card(
+          colors =
+            CardDefaults.cardColors(
+              containerColor = if (isInsideGeofence) Color(0xFF064E3B) else Color(0xFF1E293B)
+            ),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = loc.label,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+              )
+              Text(
+                text = loc.address,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFD1D5DB),
+              )
+              Text(
+                text =
+                  "Coords: ${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF94A3B8),
+              )
+            }
+            if (distMeters != null) {
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isInsideGeofence) Color(0xFF10B981) else Color(0xFF334155),
+              ) {
+                Text(
+                  text = "${distMeters.roundToInt()}m",
+                  color = Color.White,
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AddCustomerDialog(
+  hasCurrentGps: Boolean,
+  isSaving: Boolean,
+  onConfirm: (String, String, Boolean, String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var customerName by remember { mutableStateOf("") }
+  var locationLabel by remember { mutableStateOf("Main Building") }
+  var useCurrentGps by remember { mutableStateOf(hasCurrentGps) }
+  var addressText by remember { mutableStateOf("") }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Add New Customer") },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedTextField(
+          value = customerName,
+          onValueChange = { customerName = it },
+          label = { Text("Customer / Company Name") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = locationLabel,
+          onValueChange = { locationLabel = it },
+          label = { Text("First Site Label (e.g. Main Roof, Building A)") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          FilterChip(
+            selected = useCurrentGps,
+            onClick = { useCurrentGps = true },
+            label = { Text("Use Current GPS") },
+          )
+          FilterChip(
+            selected = !useCurrentGps,
+            onClick = { useCurrentGps = false },
+            label = { Text("By Street Address") },
+          )
+        }
+
+        if (!useCurrentGps) {
+          OutlinedTextField(
+            value = addressText,
+            onValueChange = { addressText = it },
+            label = { Text("Street Address (City, State)") },
+            placeholder = { Text("e.g. 350 5th Ave, New York, NY") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+        } else {
+          OutlinedTextField(
+            value = addressText,
+            onValueChange = { addressText = it },
+            label = { Text("Optional Address Note") },
+            placeholder = { Text("Uses your current device GPS coordinates") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        enabled = customerName.isNotBlank() && !isSaving,
+        onClick = { onConfirm(customerName, locationLabel, useCurrentGps, addressText) },
+      ) {
+        Text("Save Customer")
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel")
+      }
+    },
+  )
+}
+
+@Composable
+private fun AddLocationDialog(
+  customerName: String,
+  currentLocation: Location?,
+  isSaving: Boolean,
+  onConfirm: (String, Boolean, String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var locationLabel by remember { mutableStateOf("Secondary Site / Roof Unit") }
+  var useCurrentGps by remember { mutableStateOf(currentLocation != null) }
+  var addressText by remember { mutableStateOf("") }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Add Location for $customerName") },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedTextField(
+          value = locationLabel,
+          onValueChange = { locationLabel = it },
+          label = { Text("Location Name (e.g. North Wing, Annex)") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          FilterChip(
+            selected = useCurrentGps,
+            onClick = { useCurrentGps = true },
+            label = { Text("Current GPS Location") },
+          )
+          FilterChip(
+            selected = !useCurrentGps,
+            onClick = { useCurrentGps = false },
+            label = { Text("Street Address") },
+          )
+        }
+
+        if (useCurrentGps) {
+          Text(
+            text =
+              if (currentLocation != null) {
+                "Device GPS: ${"%.5f".format(currentLocation.latitude)}, ${"%.5f".format(currentLocation.longitude)}"
+              } else {
+                "Waiting for GPS signal..."
+              },
+            style = MaterialTheme.typography.bodySmall,
+          )
+          OutlinedTextField(
+            value = addressText,
+            onValueChange = { addressText = it },
+            label = { Text("Address / Site Note (Optional)") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+        } else {
+          OutlinedTextField(
+            value = addressText,
+            onValueChange = { addressText = it },
+            label = { Text("Enter Street Address") },
+            placeholder = { Text("e.g. 1600 Amphitheatre Pkwy, Mountain View, CA") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        enabled = (useCurrentGps || addressText.isNotBlank()) && !isSaving,
+        onClick = { onConfirm(locationLabel, useCurrentGps, addressText) },
+      ) {
+        Text("Add Location")
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel")
+      }
+    },
+  )
+}
+
+@Composable
+private fun CameraXPreview(
+  imageCapture: ImageCapture,
+  modifier: Modifier = Modifier,
+) {
+  val context = LocalContext.current
+  val lifecycleOwner = LocalLifecycleOwner.current
+  val previewView = remember {
+    PreviewView(context).apply {
+      layoutParams =
+        ViewGroup.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+      scaleType = PreviewView.ScaleType.FILL_CENTER
+      implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+    }
+  }
+
+  LaunchedEffect(lifecycleOwner) {
+    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+    cameraProviderFuture.addListener(
+      {
+        val cameraProvider = cameraProviderFuture.get()
+        val preview =
+          CameraPreview.Builder().build().also {
+            it.surfaceProvider = previewView.surfaceProvider
+          }
+
+        try {
+          cameraProvider.unbindAll()
+          cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            CameraSelector.DEFAULT_BACK_CAMERA,
+            preview,
+            imageCapture,
+          )
+        } catch (_: Exception) {
+          // Ignore binding error on devices without a rear camera
+        }
+      },
+      ContextCompat.getMainExecutor(context),
+    )
+  }
+
+  AndroidView(
+    factory = { previewView },
+    modifier = modifier,
+  )
+}
+
+@Composable
+private fun ShutterButton(
+  enabled: Boolean,
+  isUploading: Boolean,
+  onClick: () -> Unit,
+) {
+  Box(
+    contentAlignment = Alignment.Center,
+    modifier =
+      Modifier.size(84.dp)
+        .clip(CircleShape)
+        .border(4.dp, Color.White, CircleShape)
+        .padding(8.dp)
+        .clip(CircleShape)
+        .background(if (enabled) Color.White else Color.Gray)
+        .clickable(enabled = enabled, onClick = onClick),
+  ) {
+    if (isUploading) {
+      CircularProgressIndicator(
+        modifier = Modifier.size(32.dp),
+        color = Color(0xFF0B0F14),
+        strokeWidth = 3.dp,
+      )
+    }
+  }
+}
+
+@Composable
+private fun PermissionPromptOverlay(
+  hasCameraPermission: Boolean,
+  hasLocationPermission: Boolean,
+  onRequestPermissions: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Card(
+    modifier = modifier.padding(24.dp).fillMaxWidth(),
+    colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2937)),
+  ) {
+    Column(
+      modifier = Modifier.padding(24.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(
+        text = "Camera & GPS Access Needed",
+        style = MaterialTheme.typography.titleLarge,
+        color = Color.White,
+        fontWeight = FontWeight.Bold,
+      )
+      Text(
+        text =
+          "JobSight requires Camera access for zero-click field photos and Fine Location to auto-tag customers within 100 meters.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = Color(0xFFD1D5DB),
+      )
+      Button(onClick = onRequestPermissions) {
+        Text(
+          when {
+            !hasCameraPermission && !hasLocationPermission -> "Grant Camera & Location"
+            !hasCameraPermission -> "Grant Camera Permission"
+            else -> "Grant Location Permission"
+          }
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun AiPartAnalysisBottomSheet(
+  customerName: String,
+  parts: List<HvacPartAnalysis>,
+  onSearchPartOnline: (String) -> Unit,
+  onClose: () -> Unit,
+) {
+  Column(
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(horizontal = 20.dp)
+        .padding(bottom = 32.dp),
+    verticalArrangement = Arrangement.spacedBy(14.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column {
+        Text(
+          text = "AI HVAC Part Identification",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+        )
+        Text(
+          text = "Tagged Customer: $customerName",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFF9CA3AF),
+        )
+      }
+      TextButton(onClick = onClose) {
+        Text("Done", color = Color(0xFF38BDF8))
+      }
+    }
+
+    LazyColumn(
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      items(parts) { part ->
+        Card(
+          colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2937)),
+          shape = RoundedCornerShape(14.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text(
+              text = part.partName,
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.SemiBold,
+              color = Color.White,
+            )
+            if (!part.modelNumber.isNullOrBlank()) {
+              Text(
+                text = "Model / Part #: ${part.modelNumber}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF34D399),
+              )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Button(
+              onClick = { onSearchPartOnline(part.searchQuery) },
+              modifier = Modifier.fillMaxWidth(),
+              colors =
+                ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF0284C7),
+                  contentColor = Color.White,
+                ),
+            ) {
+              Text("Search Replacement Parts Online")
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private fun capturePhotoToCache(
+  context: Context,
+  imageCapture: ImageCapture,
+  onCaptured: (File) -> Unit,
+) {
+  val cacheFile =
+    File(
+      context.cacheDir,
+      "jobsight_capture_${System.currentTimeMillis()}.jpg",
+    )
+  val outputOptions = ImageCapture.OutputFileOptions.Builder(cacheFile).build()
+
+  imageCapture.takePicture(
+    outputOptions,
+    ContextCompat.getMainExecutor(context),
+    object : ImageCapture.OnImageSavedCallback {
+      override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+        onCaptured(cacheFile)
+      }
+
+      override fun onError(exception: ImageCaptureException) {
+        if (cacheFile.exists()) {
+          cacheFile.delete()
+        }
+      }
+    },
+  )
+}
