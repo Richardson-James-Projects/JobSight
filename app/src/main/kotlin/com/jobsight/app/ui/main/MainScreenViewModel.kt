@@ -367,6 +367,87 @@ class MainScreenViewModel(
     }
   }
 
+  fun deleteCustomer(customerId: Long) {
+    val customerName =
+      _uiState.value.customers.find { it.id == customerId }?.name ?: "Customer"
+
+    viewModelScope.launch {
+      _uiState.update { it.copy(isSavingCustomerOrLocation = true, errorMessage = null) }
+      try {
+        dataRepository.deleteCustomer(customerId)
+        val refreshedCustomers = dataRepository.getCustomers()
+        val nextHubCustomerId = refreshedCustomers.firstOrNull()?.id
+
+        _uiState.update { state ->
+          val updatedMatch =
+            state.currentLocation?.let { loc ->
+              LocationTracker.findClosestCustomer(loc, refreshedCustomers)
+            }
+          val clearedManualCustomer =
+            state.manualCustomerOverrideId?.takeIf { it != customerId }
+          val clearedManualLocation =
+            if (clearedManualCustomer == null) null else state.manualLocationOverrideId
+
+          state.copy(
+            isSavingCustomerOrLocation = false,
+            customers = refreshedCustomers,
+            closestMatch = updatedMatch,
+            manualCustomerOverrideId = clearedManualCustomer,
+            manualLocationOverrideId = clearedManualLocation,
+            selectedHubCustomerId = nextHubCustomerId,
+            customerPhotos = if (nextHubCustomerId == null) emptyList() else state.customerPhotos,
+            statusBannerMessage = "Removed customer '$customerName' and all its locations",
+          )
+        }
+
+        if (nextHubCustomerId != null) {
+          loadPhotosForCustomer(nextHubCustomerId)
+        }
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(
+            isSavingCustomerOrLocation = false,
+            errorMessage = "Could not remove customer: ${e.message}",
+          )
+        }
+      }
+    }
+  }
+
+  fun deleteLocationFromCustomer(locationId: Long, locationLabel: String) {
+    viewModelScope.launch {
+      _uiState.update { it.copy(isSavingCustomerOrLocation = true, errorMessage = null) }
+      try {
+        dataRepository.deleteCustomerLocation(locationId)
+        val refreshedCustomers = dataRepository.getCustomers()
+
+        _uiState.update { state ->
+          val updatedMatch =
+            state.currentLocation?.let { loc ->
+              LocationTracker.findClosestCustomer(loc, refreshedCustomers)
+            }
+          val clearedManualLocation =
+            state.manualLocationOverrideId?.takeIf { it != locationId }
+
+          state.copy(
+            isSavingCustomerOrLocation = false,
+            customers = refreshedCustomers,
+            closestMatch = updatedMatch,
+            manualLocationOverrideId = clearedManualLocation,
+            statusBannerMessage = "Removed location '$locationLabel'",
+          )
+        }
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(
+            isSavingCustomerOrLocation = false,
+            errorMessage = "Could not remove location: ${e.message}",
+          )
+        }
+      }
+    }
+  }
+
   // --- Camera Capture & Upload (saves both customer_id and customer_location_id) ---
 
   fun onPhotoCapturedToCache(cacheFile: File) {

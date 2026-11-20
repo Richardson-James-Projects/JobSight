@@ -138,6 +138,8 @@ private class FakeJobSightRepository : DataRepository {
   override suspend fun createCustomer(name: String): Customer =
     Customer(id = 3L, name = name)
 
+  override suspend fun deleteCustomer(customerId: Long) {}
+
   override suspend fun addCustomerLocation(
     customerId: Long,
     label: String,
@@ -153,6 +155,8 @@ private class FakeJobSightRepository : DataRepository {
       latitude = latitude,
       longitude = longitude,
     )
+
+  override suspend fun deleteCustomerLocation(locationId: Long) {}
 
   override suspend fun geocodeAddress(addressQuery: String): ResolvedAddress =
     ResolvedAddress(addressQuery, 37.422, -122.084)

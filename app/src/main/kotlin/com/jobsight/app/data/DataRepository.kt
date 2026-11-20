@@ -34,6 +34,7 @@ import okhttp3.WebSocketListener
 interface DataRepository {
   suspend fun getCustomers(): List<Customer>
   suspend fun createCustomer(name: String): Customer
+  suspend fun deleteCustomer(customerId: Long)
   suspend fun addCustomerLocation(
     customerId: Long,
     label: String,
@@ -41,6 +42,7 @@ interface DataRepository {
     latitude: Double,
     longitude: Double,
   ): CustomerLocation
+  suspend fun deleteCustomerLocation(locationId: Long)
 
   suspend fun geocodeAddress(addressQuery: String): ResolvedAddress
 
@@ -119,6 +121,24 @@ class DefaultDataRepository : DataRepository {
       }
     }
 
+  override suspend fun deleteCustomer(customerId: Long) =
+    withContext(Dispatchers.IO) {
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/customers?id=eq.$customerId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .delete()
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to delete customer (${response.code}): $body")
+        }
+      }
+    }
+
   override suspend fun addCustomerLocation(
     customerId: Long,
     label: String,
@@ -153,6 +173,24 @@ class DefaultDataRepository : DataRepository {
           throw IOException("Failed to add customer location (${response.code}): $body")
         }
         json.decodeFromString<List<CustomerLocation>>(body).first()
+      }
+    }
+
+  override suspend fun deleteCustomerLocation(locationId: Long) =
+    withContext(Dispatchers.IO) {
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/customer_locations?id=eq.$locationId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .delete()
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to delete customer location (${response.code}): $body")
+        }
       }
     }
 

@@ -173,7 +173,9 @@ fun MainScreen(
     onCloseCustomerHub = viewModel::closeCustomerHub,
     onSelectHubCustomer = viewModel::selectHubCustomer,
     onCreateCustomer = viewModel::createNewCustomer,
+    onDeleteCustomer = viewModel::deleteCustomer,
     onAddLocationToCustomer = viewModel::addLocationToCustomer,
+    onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
     onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
     onShowPartsForPhoto = viewModel::showPartsForPhoto,
     onDismissBottomSheet = viewModel::dismissBottomSheet,
@@ -198,7 +200,9 @@ internal fun FieldCameraContent(
   onCloseCustomerHub: () -> Unit,
   onSelectHubCustomer: (Long) -> Unit,
   onCreateCustomer: (String, String, Boolean, String) -> Unit,
+  onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onDeleteLocationFromCustomer: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onDismissBottomSheet: () -> Unit,
@@ -392,7 +396,9 @@ internal fun FieldCameraContent(
           onCloseCustomerHub()
         },
         onCreateCustomer = onCreateCustomer,
+        onDeleteCustomer = onDeleteCustomer,
         onAddLocationToCustomer = onAddLocationToCustomer,
+        onDeleteLocationFromCustomer = onDeleteLocationFromCustomer,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -474,7 +480,7 @@ private fun GeofenceHeaderBadge(
                 manualCustomer != null -> "Selected: ${manualCustomer.name} (Manual)"
                 autoDetected != null -> "Detected: ${autoDetected.name}"
                 !hasLocationPermission -> "Location Permission Required"
-                uiState.currentLocation == null -> "Acquiring GPS Coordinates..."
+                uiState.currentLocation == null -> "Acquiring GPS Location..."
                 closest != null ->
                   "Outside Geofence (${closest.distanceMeters.roundToInt()}m to ${closest.customer.name})"
                 else -> "No Customers in Geofence (< 100m)"
@@ -483,30 +489,33 @@ private fun GeofenceHeaderBadge(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
           )
-          Spacer(modifier = Modifier.height(2.dp))
-          Text(
-            text =
-              when {
-                manualCustomer != null -> {
-                  val locLabel = manualLocation?.label ?: "Primary Site"
-                  val locAddr = manualLocation?.address ?: manualCustomer.address
-                  "Location: $locLabel • $locAddr"
-                }
-                autoDetected != null -> {
-                  val matchedLoc = uiState.autoDetectedLocation
-                  val locLabel = matchedLoc?.label ?: "Site"
-                  val locAddr = matchedLoc?.address ?: autoDetected.address
-                  "${closest?.distanceMeters?.roundToInt() ?: 0}m away • $locLabel ($locAddr)"
-                }
-                uiState.currentLocation != null ->
-                  "GPS: ${"%.5f".format(uiState.currentLocation.latitude)}, ${"%.5f".format(uiState.currentLocation.longitude)}"
-                else -> "Waiting for FusedLocationProviderClient..."
-              },
-            color = Color(0xFFD1D5DB),
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-          )
+          val subtitleText =
+            when {
+              manualCustomer != null -> {
+                val locLabel = manualLocation?.label ?: "Primary Site"
+                val locAddr = manualLocation?.address ?: manualCustomer.address
+                "Location: $locLabel • $locAddr"
+              }
+              autoDetected != null -> {
+                val matchedLoc = uiState.autoDetectedLocation
+                val locLabel = matchedLoc?.label ?: "Site"
+                val locAddr = matchedLoc?.address ?: autoDetected.address
+                "${closest?.distanceMeters?.roundToInt() ?: 0}m away • $locLabel ($locAddr)"
+              }
+              uiState.currentLocation != null ->
+                "GPS: ${"%.5f".format(uiState.currentLocation.latitude)}, ${"%.5f".format(uiState.currentLocation.longitude)}"
+              else -> null
+            }
+          if (subtitleText != null) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+              text = subtitleText,
+              color = Color(0xFFD1D5DB),
+              style = MaterialTheme.typography.bodySmall,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
         }
 
         if (manualCustomer != null) {
@@ -743,7 +752,9 @@ private fun CustomerHubBottomSheet(
   onSelectHubCustomer: (Long) -> Unit,
   onSetAsActiveCustomerAndLocation: (Long, Long?) -> Unit,
   onCreateCustomer: (String, String, Boolean, String) -> Unit,
+  onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onDeleteLocationFromCustomer: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
@@ -752,6 +763,8 @@ private fun CustomerHubBottomSheet(
   var selectedTabIndex by remember { mutableIntStateOf(0) } // 0 = Photos, 1 = Locations
   var showNewCustomerDialog by remember { mutableStateOf(false) }
   var showAddLocationDialog by remember { mutableStateOf(false) }
+  var customerPendingDeletion by remember { mutableStateOf<Customer?>(null) }
+  var locationPendingDeletion by remember { mutableStateOf<Pair<Long, String>?>(null) }
 
   Column(
     modifier =
@@ -828,19 +841,35 @@ private fun CustomerHubBottomSheet(
           modifier = Modifier.padding(12.dp),
           verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-              text = selectedCustomer.name,
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.Bold,
-              color = Color.White,
-            )
-            Text(
-              text =
-                "${selectedCustomer.locations.size} location(s) • ${uiState.customerPhotos.size} photo(s) captured",
-              style = MaterialTheme.typography.bodySmall,
-              color = Color(0xFF94A3B8),
-            )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = selectedCustomer.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+              )
+              Text(
+                text =
+                  "${selectedCustomer.locations.size} location(s) • ${uiState.customerPhotos.size} photo(s) captured",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF94A3B8),
+              )
+            }
+            OutlinedButton(
+              onClick = { customerPendingDeletion = selectedCustomer },
+              colors =
+                ButtonDefaults.outlinedButtonColors(
+                  contentColor = Color(0xFFF87171),
+                ),
+              modifier = Modifier.height(32.dp),
+            ) {
+              Text("Remove Customer", style = MaterialTheme.typography.labelSmall)
+            }
           }
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -912,10 +941,77 @@ private fun CustomerHubBottomSheet(
           onTagLocationClick = { locId ->
             onSetAsActiveCustomerAndLocation(selectedCustomer.id, locId)
           },
+          onDeleteLocationClick = { locId, locLabel ->
+            locationPendingDeletion = locId to locLabel
+          },
           modifier = Modifier.weight(1f),
         )
       }
     }
+  }
+
+  // Confirm Remove Customer Dialog (cascades and deletes all locations for that customer)
+  customerPendingDeletion?.let { cust ->
+    AlertDialog(
+      onDismissRequest = { customerPendingDeletion = null },
+      title = { Text("Remove Customer?") },
+      text = {
+        Text(
+          "Are you sure you want to remove '${cust.name}'? This will also remove all ${cust.locations.size} site location(s) under this customer."
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            customerPendingDeletion = null
+            onDeleteCustomer(cust.id)
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFFDC2626),
+              contentColor = Color.White,
+            ),
+        ) {
+          Text("Remove Customer")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { customerPendingDeletion = null }) {
+          Text("Cancel")
+        }
+      },
+    )
+  }
+
+  // Confirm Remove Site Location Dialog
+  locationPendingDeletion?.let { (locId, locLabel) ->
+    AlertDialog(
+      onDismissRequest = { locationPendingDeletion = null },
+      title = { Text("Remove Site Location?") },
+      text = {
+        Text("Are you sure you want to remove the location '$locLabel'?")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            locationPendingDeletion = null
+            onDeleteLocationFromCustomer(locId, locLabel)
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFFDC2626),
+              contentColor = Color.White,
+            ),
+        ) {
+          Text("Remove Location")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { locationPendingDeletion = null }) {
+          Text("Cancel")
+        }
+      },
+    )
   }
 
   if (showNewCustomerDialog) {
@@ -1102,6 +1198,7 @@ private fun CustomerLocationsSection(
   currentLocation: Location?,
   onAddLocationClick: () -> Unit,
   onTagLocationClick: (Long) -> Unit,
+  onDeleteLocationClick: (Long, String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   Column(
@@ -1192,15 +1289,30 @@ private fun CustomerLocationsSection(
                 }
               }
             }
-            OutlinedButton(
-              onClick = { onTagLocationClick(loc.id) },
-              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-              modifier = Modifier.fillMaxWidth().height(34.dp),
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              Text(
-                text = "Tag Camera Photos at '${loc.label}'",
-                style = MaterialTheme.typography.labelSmall,
-              )
+              OutlinedButton(
+                onClick = { onTagLocationClick(loc.id) },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                modifier = Modifier.weight(1f).height(34.dp),
+              ) {
+                Text(
+                  text = "Tag Camera Here",
+                  style = MaterialTheme.typography.labelSmall,
+                )
+              }
+              OutlinedButton(
+                onClick = { onDeleteLocationClick(loc.id, loc.label) },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                modifier = Modifier.height(34.dp),
+              ) {
+                Text(
+                  text = "Remove",
+                  style = MaterialTheme.typography.labelSmall,
+                )
+              }
             }
           }
         }
