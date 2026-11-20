@@ -402,13 +402,43 @@ class DefaultDataRepository : DataRepository {
             .post(insertBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        httpClient.newCall(insertRequest).execute().use { insertResponse ->
-          val body = insertResponse.body?.string().orEmpty()
-          if (!insertResponse.isSuccessful) {
-            throw IOException("Database insert failed (${insertResponse.code}): $body")
+        val insertedPhoto =
+          httpClient.newCall(insertRequest).execute().use { insertResponse ->
+            val body = insertResponse.body?.string().orEmpty()
+            if (!insertResponse.isSuccessful) {
+              throw IOException("Database insert failed (${insertResponse.code}): $body")
+            }
+            json.decodeFromString<List<CapturedPhotoRow>>(body).first()
           }
-          json.decodeFromString<List<CapturedPhotoRow>>(body).first()
+
+        // Trigger the Supabase Edge Function 'analyze-job-photo' asynchronously
+        try {
+          val fnPayload =
+            buildJsonObject {
+              put("photo_id", insertedPhoto.id)
+              put("image_url", insertedPhoto.imageUrl)
+            }
+          val fnRequest =
+            Request.Builder()
+              .url("$supabaseUrl/functions/v1/analyze-job-photo")
+              .header("apikey", apiKey)
+              .header("Authorization", "Bearer $apiKey")
+              .header("Content-Type", "application/json")
+              .post(fnPayload.toString().toRequestBody("application/json".toMediaType()))
+              .build()
+          httpClient.newCall(fnRequest).enqueue(
+            object : okhttp3.Callback {
+              override fun onFailure(call: okhttp3.Call, e: IOException) {}
+              override fun onResponse(call: okhttp3.Call, response: Response) {
+                response.close()
+              }
+            }
+          )
+        } catch (_: Exception) {
+          // Database trigger (pg_net) also invokes the Edge Function on INSERT
         }
+
+        insertedPhoto
       } finally {
         // 3. Flush local cache immediately per architecture plan
         if (cacheFile.exists()) {
