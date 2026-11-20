@@ -7,11 +7,15 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.location.Location
 import android.net.Uri
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview as CameraPreview
@@ -65,6 +69,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -230,12 +235,23 @@ internal fun FieldCameraContent(
       .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
       .build()
   }
+  var activeCamera by remember { mutableStateOf<Camera?>(null) }
+  var currentZoomRatio by remember { mutableFloatStateOf(1.0f) }
+  var minZoomRatio by remember { mutableFloatStateOf(1.0f) }
+  var maxZoomRatio by remember { mutableFloatStateOf(8.0f) }
 
   Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0F14))) {
-    // 1. Full-screen distortion-free CameraX PreviewView
+    // 1. Full-screen distortion-free CameraX PreviewView with Pinch-to-Zoom & Tap-to-Focus
     if (hasCameraPermission) {
       CameraXPreview(
         imageCapture = imageCapture,
+        onCameraReady = { camera, initZoom, minZoom, maxZoom ->
+          activeCamera = camera
+          currentZoomRatio = initZoom
+          minZoomRatio = minZoom
+          maxZoomRatio = maxZoom
+        },
+        onZoomRatioChanged = { newRatio -> currentZoomRatio = newRatio },
         modifier = Modifier.fillMaxSize(),
       )
     } else {
@@ -326,7 +342,7 @@ internal fun FieldCameraContent(
       }
     }
 
-    // 3. Bottom Zero-Click Shutter Bar
+    // 3. Bottom Zero-Click Shutter Bar + Camera Zoom Controls
     Column(
       modifier =
         Modifier.align(Alignment.BottomCenter)
@@ -335,6 +351,20 @@ internal fun FieldCameraContent(
           .padding(bottom = 28.dp, start = 24.dp, end = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+      if (hasCameraPermission) {
+        CameraZoomSelectorBar(
+          currentZoomRatio = currentZoomRatio,
+          minZoomRatio = minZoomRatio,
+          maxZoomRatio = maxZoomRatio,
+          onSelectZoomRatio = { targetRatio ->
+            val clamped = targetRatio.coerceIn(minZoomRatio, maxZoomRatio)
+            currentZoomRatio = clamped
+            activeCamera?.cameraControl?.setZoomRatio(clamped)
+          },
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+      }
+
       ShutterButton(
         enabled = hasCameraPermission && !uiState.isUploadingPhoto,
         isUploading = uiState.isUploadingPhoto,
@@ -1790,13 +1820,18 @@ private fun AddLocationDialog(
   )
 }
 
+@android.annotation.SuppressLint("ClickableViewAccessibility")
 @Composable
 private fun CameraXPreview(
   imageCapture: ImageCapture,
+  onCameraReady: (Camera, Float, Float, Float) -> Unit,
+  onZoomRatioChanged: (Float) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val context = LocalContext.current
   val lifecycleOwner = LocalLifecycleOwner.current
+  var boundCamera by remember { mutableStateOf<Camera?>(null) }
+
   val previewView = remember {
     PreviewView(context).apply {
       layoutParams =
@@ -1806,6 +1841,47 @@ private fun CameraXPreview(
         )
       scaleType = PreviewView.ScaleType.FILL_CENTER
       implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+    }
+  }
+
+  LaunchedEffect(previewView, boundCamera) {
+    val camera = boundCamera ?: return@LaunchedEffect
+    val scaleGestureDetector =
+      ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+          override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val zoomState = camera.cameraInfo.zoomState.value ?: return false
+            val newRatio =
+              (zoomState.zoomRatio * detector.scaleFactor).coerceIn(
+                zoomState.minZoomRatio,
+                zoomState.maxZoomRatio,
+              )
+            camera.cameraControl.setZoomRatio(newRatio)
+            onZoomRatioChanged(newRatio)
+            return true
+          }
+        },
+      )
+
+    var downTimestamp = 0L
+    previewView.setOnTouchListener { _, event ->
+      scaleGestureDetector.onTouchEvent(event)
+      when (event.actionMasked) {
+        MotionEvent.ACTION_DOWN -> {
+          downTimestamp = System.currentTimeMillis()
+        }
+        MotionEvent.ACTION_UP -> {
+          if (!scaleGestureDetector.isInProgress &&
+              System.currentTimeMillis() - downTimestamp < 250L
+          ) {
+            val point = previewView.meteringPointFactory.createPoint(event.x, event.y)
+            val focusAction = FocusMeteringAction.Builder(point).build()
+            camera.cameraControl.startFocusAndMetering(focusAction)
+          }
+        }
+      }
+      true
     }
   }
 
@@ -1821,11 +1897,20 @@ private fun CameraXPreview(
 
         try {
           cameraProvider.unbindAll()
-          cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            CameraSelector.DEFAULT_BACK_CAMERA,
-            preview,
-            imageCapture,
+          val camera =
+            cameraProvider.bindToLifecycle(
+              lifecycleOwner,
+              CameraSelector.DEFAULT_BACK_CAMERA,
+              preview,
+              imageCapture,
+            )
+          boundCamera = camera
+          val zoomState = camera.cameraInfo.zoomState.value
+          onCameraReady(
+            camera,
+            zoomState?.zoomRatio ?: 1.0f,
+            zoomState?.minZoomRatio ?: 1.0f,
+            zoomState?.maxZoomRatio ?: 8.0f,
           )
         } catch (_: Exception) {
           // Ignore binding error on devices without a rear camera
@@ -1839,6 +1924,84 @@ private fun CameraXPreview(
     factory = { previewView },
     modifier = modifier,
   )
+}
+
+@Composable
+private fun CameraZoomSelectorBar(
+  currentZoomRatio: Float,
+  minZoomRatio: Float,
+  maxZoomRatio: Float,
+  onSelectZoomRatio: (Float) -> Unit,
+) {
+  val presets =
+    remember(minZoomRatio, maxZoomRatio) {
+      buildList {
+        if (minZoomRatio < 0.9f) add(minZoomRatio)
+        add(1.0f)
+        if (maxZoomRatio >= 2.0f) add(2.0f)
+        if (maxZoomRatio >= 4.0f) add(4.0f)
+        if (maxZoomRatio >= 8.0f) add(8.0f)
+      }
+    }
+
+  Surface(
+    shape = RoundedCornerShape(24.dp),
+    color = Color(0xB3111827),
+    modifier = Modifier.border(1.dp, Color(0xFF374151), RoundedCornerShape(24.dp)),
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      presets.forEach { preset ->
+        val isActive = kotlin.math.abs(currentZoomRatio - preset) < 0.15f
+        val displayLabel =
+          if (isActive) {
+            if (currentZoomRatio % 1.0f < 0.08f) "${currentZoomRatio.toInt()}x"
+            else "${"%.1f".format(currentZoomRatio)}x"
+          } else {
+            if (preset % 1.0f < 0.08f) "${preset.toInt()}x" else "${"%.1f".format(preset)}x"
+          }
+
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier =
+            Modifier.size(36.dp)
+              .clip(CircleShape)
+              .background(if (isActive) Color.White else Color(0xFF1F2937))
+              .clickable { onSelectZoomRatio(preset) },
+        ) {
+          Text(
+            text = displayLabel,
+            color = if (isActive) Color(0xFF0B0F14) else Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+      }
+
+      // If user pinched to an in-between zoom ratio (e.g. 2.7x), show a live indicator chip
+      val matchesAnyPreset = presets.any { kotlin.math.abs(currentZoomRatio - it) < 0.15f }
+      if (!matchesAnyPreset) {
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier =
+            Modifier.height(36.dp)
+              .clip(RoundedCornerShape(18.dp))
+              .background(Color(0xFF38BDF8))
+              .padding(horizontal = 10.dp),
+        ) {
+          Text(
+            text = "${"%.1f".format(currentZoomRatio)}x",
+            color = Color(0xFF0B0F14),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+      }
+    }
+  }
 }
 
 @Composable
