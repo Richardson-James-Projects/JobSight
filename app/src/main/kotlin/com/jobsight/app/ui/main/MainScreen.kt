@@ -179,7 +179,12 @@ fun MainScreen(
     onSelectHubCustomer = viewModel::selectHubCustomer,
     onCreateCustomer = viewModel::createNewCustomer,
     onDeleteCustomer = viewModel::deleteCustomer,
-    onAddLocationToCustomer = viewModel::addLocationToCustomer,
+    onAddLocationToCustomer = { customerId, label, useGps, address ->
+      viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = false)
+    },
+    onAddAndSelectLocationForCustomer = { customerId, label, useGps, address ->
+      viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = true)
+    },
     onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
     onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
     onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
@@ -214,6 +219,7 @@ internal fun FieldCameraContent(
   onCreateCustomer: (String, String, Boolean, String) -> Unit,
   onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onAddAndSelectLocationForCustomer: (Long, String, Boolean, String) -> Unit = onAddLocationToCustomer,
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
   onOpenSearchSitesSettings: () -> Unit,
   onCloseSearchSitesSettings: () -> Unit,
@@ -396,7 +402,7 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 4. Clean Customer Selector Popup (styled just like the Search Sites list!)
+  // 4. Two-Step Customer -> Location Selector Popup (works with or without GPS!)
   if (uiState.isCustomerPickerVisible) {
     CustomerTagListDialog(
       uiState = uiState,
@@ -404,6 +410,9 @@ internal fun FieldCameraContent(
       onCreateCustomerFromPicker = { name, locLabel, useGps, address ->
         onCloseCustomerPicker()
         onCreateCustomer(name, locLabel, useGps, address)
+      },
+      onAddLocationFromPicker = { customerId, locLabel, useGps, address ->
+        onAddAndSelectLocationForCustomer(customerId, locLabel, useGps, address)
       },
       onOpenSettingsClick = {
         onCloseCustomerPicker()
@@ -648,18 +657,29 @@ private fun GeofenceHeaderBadge(
 }
 
 /**
- * Clean vertical popup list (styled just like the "Choose Site to Search" dialog!)
- * to select a Customer (& Site Location) for the camera photo tag.
+ * Two-Step Customer -> Location Selector Dialog:
+ * Step 1: Pick a Customer (or "+ New Customer")
+ * Step 2: Pick which Site Location of that Customer to tag (or "+ New Location for [Customer]")
+ * Works seamlessly even when the device has no GPS signal!
  */
 @Composable
 private fun CustomerTagListDialog(
   uiState: FieldCameraUiState,
   onSelectCustomerAndLocation: (Long?, Long?) -> Unit,
   onCreateCustomerFromPicker: (String, String, Boolean, String) -> Unit,
+  onAddLocationFromPicker: (Long, String, Boolean, String) -> Unit,
   onOpenSettingsClick: () -> Unit,
   onDismiss: () -> Unit,
 ) {
   var showNewCustomerDialog by remember { mutableStateOf(false) }
+  var selectedCustomerForLocationStep by remember { mutableStateOf<Customer?>(null) }
+  var showNewLocationForSelectedCustomer by remember { mutableStateOf(false) }
+
+  // Keep selectedCustomerForLocationStep in sync with latest customers list
+  val activeStepCustomer =
+    selectedCustomerForLocationStep?.let { picked ->
+      uiState.customers.find { it.id == picked.id } ?: picked
+    }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -668,86 +688,51 @@ private fun CustomerTagListDialog(
     textContentColor = Color.White,
     title = {
       Column {
-        Text(
-          text =
-            if (uiState.hasPendingPhotoAwaitingCustomer) {
-              "Select Customer to Save Photo"
-            } else {
-              "Select Customer for Photo Tag"
-            },
-          fontWeight = FontWeight.Bold,
-        )
-        Text(
-          text =
-            if (uiState.hasPendingPhotoAwaitingCustomer) {
-              "Choose which customer to save the captured photo to (or add a new customer)"
-            } else {
-              "Tap a customer site below or create a new customer"
-            },
-          style = MaterialTheme.typography.bodySmall,
-          color = Color(0xFF94A3B8),
-        )
+        if (activeStepCustomer == null) {
+          Text(
+            text =
+              if (uiState.hasPendingPhotoAwaitingCustomer) {
+                "Step 1: Select Customer for Photo"
+              } else {
+                "Step 1: Select Customer"
+              },
+            fontWeight = FontWeight.Bold,
+          )
+          Text(
+            text = "Choose a customer below, then pick their site location",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF94A3B8),
+          )
+        } else {
+          Text(
+            text = "Step 2: Select Location",
+            fontWeight = FontWeight.Bold,
+          )
+          Text(
+            text = "Customer: ${activeStepCustomer.name}",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF38BDF8),
+            fontWeight = FontWeight.SemiBold,
+          )
+        }
       }
     },
     text = {
-      LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        // 0. "+ New Customer" option right in the list!
-        item {
-          Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = Color(0xFF064E3B),
-            modifier =
-              Modifier.fillMaxWidth()
-                .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
-                .clickable { showNewCustomerDialog = true },
-          ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                  text = "+ New Customer",
-                  fontWeight = FontWeight.Bold,
-                  color = Color.White,
-                )
-                Text(
-                  text = "Create customer at current GPS or by street address",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color(0xFFA7F3D0),
-                )
-              }
-              Text(
-                text = "Add →",
-                color = Color(0xFF34D399),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-              )
-            }
-          }
-        }
-
-        // 1. Auto-Detect via GPS option (hide if user needs to pick a customer for a pending photo and GPS didn't match)
-        if (!uiState.hasPendingPhotoAwaitingCustomer || uiState.autoDetectedCustomer != null) {
+      if (activeStepCustomer == null) {
+        // STEP 1: Select a Customer
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          // 0. "+ New Customer" option right at the top
           item {
-            val isAutoMode = uiState.manualCustomerOverrideId == null
-            val radiusLabel = LocationTracker.formatDistanceImperial(uiState.geofenceRadiusMeters)
-            val autoDetectedName =
-              uiState.autoDetectedCustomer?.let { cust ->
-                val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
-                "${cust.name}$locName"
-              } ?: "No customer within $radiusLabel"
-
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
+              color = Color(0xFF064E3B),
               modifier =
                 Modifier.fillMaxWidth()
-                  .clickable { onSelectCustomerAndLocation(null, null) },
+                  .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
+                  .clickable { showNewCustomerDialog = true },
             ) {
               Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -756,18 +741,113 @@ private fun CustomerTagListDialog(
               ) {
                 Column(modifier = Modifier.weight(1f)) {
                   Text(
-                    text = "Auto-Detect via GPS",
+                    text = "+ New Customer",
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                   )
                   Text(
-                    text = autoDetectedName,
+                    text =
+                      if (uiState.currentLocation != null) {
+                        "Create customer at current GPS or by street address"
+                      } else {
+                        "Create customer & add location by street address"
+                      },
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFD1D5DB),
+                    color = Color(0xFFA7F3D0),
                   )
                 }
                 Text(
-                  text = if (isAutoMode) "Active ✓" else "Use →",
+                  text = "Add →",
+                  color = Color(0xFF34D399),
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                )
+              }
+            }
+          }
+
+          // 1. Auto-Detect via GPS option (only when GPS is available and not waiting on an unmatched photo)
+          if (uiState.currentLocation != null &&
+              (!uiState.hasPendingPhotoAwaitingCustomer || uiState.autoDetectedCustomer != null)
+          ) {
+            item {
+              val isAutoMode = uiState.manualCustomerOverrideId == null
+              val radiusLabel = LocationTracker.formatDistanceImperial(uiState.geofenceRadiusMeters)
+              val autoDetectedName =
+                uiState.autoDetectedCustomer?.let { cust ->
+                  val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
+                  "${cust.name}$locName"
+                } ?: "No customer within $radiusLabel"
+
+              Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .clickable { onSelectCustomerAndLocation(null, null) },
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      text = "Auto-Detect via GPS",
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
+                    )
+                    Text(
+                      text = autoDetectedName,
+                      style = MaterialTheme.typography.labelSmall,
+                      color = Color(0xFFD1D5DB),
+                    )
+                  }
+                  Text(
+                    text = if (isAutoMode) "Active ✓" else "Use →",
+                    color = Color(0xFF34D399),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+            }
+          }
+
+          // 2. Customer list — tapping a customer moves to Step 2 (Select Location for that customer)
+          items(uiState.customers, key = { it.id }) { customer ->
+            val isCurrentCustomer = uiState.manualCustomerOverrideId == customer.id
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = if (isCurrentCustomer) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable { selectedCustomerForLocationStep = customer },
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                  Text(
+                    text = customer.name,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                  Text(
+                    text =
+                      if (customer.locations.isEmpty()) {
+                        "No saved locations yet • Tap to add or select"
+                      } else {
+                        "${customer.locations.size} site location(s) • Tap to choose location"
+                      },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF38BDF8),
+                  )
+                }
+                Text(
+                  text = "Locations →",
                   color = Color(0xFF34D399),
                   style = MaterialTheme.typography.labelMedium,
                   fontWeight = FontWeight.Bold,
@@ -776,17 +856,21 @@ private fun CustomerTagListDialog(
             }
           }
         }
-
-        // 2. Flat, clean list of Customers & their Site Locations (just like the Search Site picker)
-        items(uiState.customers, key = { it.id }) { customer ->
-          if (customer.locations.isEmpty()) {
-            val isSelected = uiState.manualCustomerOverrideId == customer.id
+      } else {
+        // STEP 2: Select a Location under `activeStepCustomer`
+        LazyColumn(
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          // "+ Add New Location" for this customer
+          item {
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              color = Color(0xFF064E3B),
               modifier =
                 Modifier.fillMaxWidth()
-                  .clickable { onSelectCustomerAndLocation(customer.id, null) },
+                  .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
+                  .clickable { showNewLocationForSelectedCustomer = true },
             ) {
               Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -795,33 +879,68 @@ private fun CustomerTagListDialog(
               ) {
                 Column(modifier = Modifier.weight(1f)) {
                   Text(
-                    text = customer.name,
+                    text = "+ Add New Location",
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                   )
                   Text(
-                    text = customer.address.ifBlank { "Default Site" },
+                    text = "Add a site location for ${activeStepCustomer.name}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF94A3B8),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    color = Color(0xFFA7F3D0),
                   )
                 }
                 Text(
-                  text = if (isSelected) "Selected ✓" else "Select →",
-                  color = Color(0xFF38BDF8),
+                  text = "Add →",
+                  color = Color(0xFF34D399),
                   style = MaterialTheme.typography.labelMedium,
                   fontWeight = FontWeight.Bold,
                 )
               }
             }
+          }
+
+          if (activeStepCustomer.locations.isEmpty()) {
+            item {
+              Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF0F172A),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .clickable {
+                      onSelectCustomerAndLocation(activeStepCustomer.id, null)
+                    },
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      text = "Default Site (Unassigned Location)",
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
+                    )
+                    Text(
+                      text = activeStepCustomer.address.ifBlank { "Tag customer without specific site" },
+                      style = MaterialTheme.typography.labelSmall,
+                      color = Color(0xFF94A3B8),
+                    )
+                  }
+                  Text(
+                    text = "Select →",
+                    color = Color(0xFF38BDF8),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+            }
           } else {
-            customer.locations.forEach { loc ->
+            items(activeStepCustomer.locations, key = { it.id }) { loc ->
               val isSelected =
-                uiState.manualCustomerOverrideId == customer.id &&
-                  (uiState.manualLocationOverrideId == loc.id ||
-                    (uiState.manualLocationOverrideId == null &&
-                      customer.locations.first().id == loc.id))
+                uiState.manualCustomerOverrideId == activeStepCustomer.id &&
+                  uiState.manualLocationOverrideId == loc.id
               val distMeters =
                 uiState.currentLocation?.let { deviceLoc ->
                   LocationTracker.distanceBetween(deviceLoc, loc.latitude, loc.longitude)
@@ -832,8 +951,9 @@ private fun CustomerTagListDialog(
                 color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
                 modifier =
                   Modifier.fillMaxWidth()
-                    .padding(bottom = 4.dp)
-                    .clickable { onSelectCustomerAndLocation(customer.id, loc.id) },
+                    .clickable {
+                      onSelectCustomerAndLocation(activeStepCustomer.id, loc.id)
+                    },
               ) {
                 Row(
                   modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -842,21 +962,21 @@ private fun CustomerTagListDialog(
                 ) {
                   Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(
-                      text = customer.name,
-                      fontWeight = FontWeight.Bold,
-                      color = Color.White,
-                    )
-                    Text(
                       text =
                         buildString {
-                          append("${loc.label} • ${loc.address}")
+                          append(loc.label)
                           if (distMeters != null) {
                             append(" (${LocationTracker.formatDistanceImperial(distMeters)})")
                           }
                         },
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
+                    )
+                    Text(
+                      text = loc.address,
                       style = MaterialTheme.typography.labelSmall,
                       color = Color(0xFF38BDF8),
-                      maxLines = 1,
+                      maxLines = 2,
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
@@ -875,12 +995,18 @@ private fun CustomerTagListDialog(
     },
     confirmButton = {
       TextButton(onClick = onOpenSettingsClick) {
-        Text("⚙ Manage Customers in Settings", color = Color(0xFF38BDF8))
+        Text("⚙ Settings", color = Color(0xFF38BDF8))
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) {
-        Text("Cancel", color = Color(0xFF94A3B8))
+      if (activeStepCustomer != null) {
+        TextButton(onClick = { selectedCustomerForLocationStep = null }) {
+          Text("← Back to Customers", color = Color(0xFF38BDF8))
+        }
+      } else {
+        TextButton(onClick = onDismiss) {
+          Text("Cancel", color = Color(0xFF94A3B8))
+        }
       }
     },
   )
@@ -894,6 +1020,19 @@ private fun CustomerTagListDialog(
         onCreateCustomerFromPicker(name, locLabel, useGps, address)
       },
       onDismiss = { showNewCustomerDialog = false },
+    )
+  }
+
+  if (showNewLocationForSelectedCustomer && activeStepCustomer != null) {
+    AddLocationDialog(
+      customerName = activeStepCustomer.name,
+      currentLocation = uiState.currentLocation,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { label, useGps, address ->
+        showNewLocationForSelectedCustomer = false
+        onAddLocationFromPicker(activeStepCustomer.id, label, useGps, address)
+      },
+      onDismiss = { showNewLocationForSelectedCustomer = false },
     )
   }
 }
@@ -1080,6 +1219,7 @@ private fun AppSettingsBottomSheet(
   onCreateCustomer: (String, String, Boolean, String) -> Unit,
   onDeleteCustomer: (Long) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
+  onAddAndSelectLocationForCustomer: (Long, String, Boolean, String) -> Unit = onAddLocationToCustomer,
   onDeleteLocationFromCustomer: (Long, String) -> Unit,
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,

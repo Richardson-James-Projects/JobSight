@@ -459,6 +459,7 @@ class MainScreenViewModel(
     label: String,
     useCurrentGps: Boolean,
     addressInput: String,
+    selectForCameraTag: Boolean = false,
   ) {
     viewModelScope.launch {
       _uiState.update { it.copy(isSavingCustomerOrLocation = true, errorMessage = null) }
@@ -501,9 +502,24 @@ class MainScreenViewModel(
             isSavingCustomerOrLocation = false,
             customers = refreshedCustomers,
             closestMatch = updatedMatch,
+            manualCustomerOverrideId =
+              if (selectForCameraTag) customerId else state.manualCustomerOverrideId,
+            manualLocationOverrideId =
+              if (selectForCameraTag) addedLocation.id else state.manualLocationOverrideId,
+            isCustomerPickerVisible =
+              if (selectForCameraTag) false else state.isCustomerPickerVisible,
             statusBannerMessage =
               "Added location '${addedLocation.label}' (${addedLocation.address})",
           )
+        }
+
+        if (selectForCameraTag) {
+          val pendingFile = pendingCachedPhotoFile
+          if (pendingFile != null && _uiState.value.activeCustomer != null) {
+            pendingCachedPhotoFile = null
+            _uiState.update { it.copy(hasPendingPhotoAwaitingCustomer = false) }
+            onPhotoCapturedToCache(pendingFile)
+          }
         }
       } catch (e: Exception) {
         _uiState.update {
