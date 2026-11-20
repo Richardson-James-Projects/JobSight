@@ -1,6 +1,7 @@
 package com.jobsight.app.data
 
 import android.content.Context
+import android.location.Geocoder
 import com.jobsight.app.BuildConfig
 import java.io.File
 import java.io.IOException
@@ -65,6 +66,7 @@ interface DataRepository {
   suspend fun deleteCustomerLocation(locationId: Long)
 
   suspend fun geocodeAddress(addressQuery: String): ResolvedAddress
+  suspend fun reverseGeocodeCoordinates(latitude: Double, longitude: Double): String?
 
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
   suspend fun deletePhotos(photos: List<CapturedPhotoRow>)
@@ -373,9 +375,30 @@ class DefaultDataRepository(
       }
     }
 
+  @Suppress("DEPRECATION")
   override suspend fun geocodeAddress(addressQuery: String): ResolvedAddress =
     withContext(Dispatchers.IO) {
       val trimmed = addressQuery.trim()
+      if (trimmed.contains("@@COORDS:")) {
+        val parts = trimmed.split("@@COORDS:")
+        val displayAddr = parts.firstOrNull()?.trim().orEmpty().ifEmpty { "Pinned Map Location" }
+        val coordsPart = parts.getOrNull(1)?.split(",")
+        val lat = coordsPart?.getOrNull(0)?.toDoubleOrNull()
+        val lon = coordsPart?.getOrNull(1)?.toDoubleOrNull()
+        if (lat != null && lon != null) {
+          val resolvedDisplay =
+            if (displayAddr == "Pinned Map Location" || displayAddr.startsWith("GPS (")) {
+              reverseGeocodeCoordinates(lat, lon) ?: displayAddr
+            } else {
+              displayAddr
+            }
+          return@withContext ResolvedAddress(
+            formattedAddress = resolvedDisplay,
+            latitude = lat,
+            longitude = lon,
+          )
+        }
+      }
       if (trimmed.isEmpty()) {
         return@withContext ResolvedAddress(
           formattedAddress = "Unspecified Address",
@@ -383,6 +406,28 @@ class DefaultDataRepository(
           longitude = 0.0,
         )
       }
+
+      // 1. Primary: Use Android's native Google Play Services Geocoder for exact rooftop coordinates
+      if (appContext != null && Geocoder.isPresent()) {
+        try {
+          val geocoder = Geocoder(appContext, Locale.getDefault())
+          val results = geocoder.getFromLocationName(trimmed, 1)
+          val best = results?.firstOrNull()
+          if (best != null && (best.latitude != 0.0 || best.longitude != 0.0)) {
+            val formatted =
+              best.getAddressLine(0)?.takeIf { it.isNotBlank() } ?: trimmed
+            return@withContext ResolvedAddress(
+              formattedAddress = formatted,
+              latitude = best.latitude,
+              longitude = best.longitude,
+            )
+          }
+        } catch (_: Exception) {
+          // Fall through to HTTP geocoder fallback
+        }
+      }
+
+      // 2. Fallback: OpenStreetMap Nominatim
       try {
         val encoded = URLEncoder.encode(trimmed, "UTF-8")
         val request =
@@ -415,6 +460,25 @@ class DefaultDataRepository(
         latitude = 0.0,
         longitude = 0.0,
       )
+    }
+
+  @Suppress("DEPRECATION")
+  override suspend fun reverseGeocodeCoordinates(
+    latitude: Double,
+    longitude: Double,
+  ): String? =
+    withContext(Dispatchers.IO) {
+      if (appContext != null && Geocoder.isPresent()) {
+        try {
+          val geocoder = Geocoder(appContext, Locale.getDefault())
+          val results = geocoder.getFromLocation(latitude, longitude, 1)
+          val line = results?.firstOrNull()?.getAddressLine(0)
+          if (!line.isNullOrBlank()) {
+            return@withContext line
+          }
+        } catch (_: Exception) {}
+      }
+      null
     }
 
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> =

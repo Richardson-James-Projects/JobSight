@@ -516,25 +516,34 @@ class MainScreenViewModel(
         if (useCurrentGps) {
           val loc = _uiState.value.currentLocation
           if (loc != null) {
+            val resolvedAddr =
+              addressInput.trim().ifEmpty {
+                dataRepository.reverseGeocodeCoordinates(loc.latitude, loc.longitude)
+                  ?: "GPS (${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)})"
+              }
             dataRepository.addCustomerLocation(
               customerId = createdCustomer.id,
               label = initialLocationLabel.ifBlank { "Primary Site" },
-              address =
-                addressInput.ifBlank {
-                  "GPS (${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)})"
-                },
+              address = resolvedAddr,
               latitude = loc.latitude,
               longitude = loc.longitude,
             )
           }
         } else if (addressInput.isNotBlank()) {
           val geocoded = dataRepository.geocodeAddress(addressInput)
+          val fallbackLoc = _uiState.value.currentLocation
+          val finalLat =
+            if (geocoded.latitude != 0.0 || geocoded.longitude != 0.0) geocoded.latitude
+            else (fallbackLoc?.latitude ?: 0.0)
+          val finalLon =
+            if (geocoded.latitude != 0.0 || geocoded.longitude != 0.0) geocoded.longitude
+            else (fallbackLoc?.longitude ?: 0.0)
           dataRepository.addCustomerLocation(
             customerId = createdCustomer.id,
             label = initialLocationLabel.ifBlank { "Primary Site" },
             address = geocoded.formattedAddress,
-            latitude = geocoded.latitude,
-            longitude = geocoded.longitude,
+            latitude = finalLat,
+            longitude = finalLon,
           )
         }
 
@@ -601,7 +610,8 @@ class MainScreenViewModel(
                 ?: throw IllegalStateException("Current GPS location is not available yet")
             val addrText =
               addressInput.trim().ifEmpty {
-                "GPS (${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)})"
+                dataRepository.reverseGeocodeCoordinates(loc.latitude, loc.longitude)
+                  ?: "GPS (${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)})"
               }
             dataRepository.addCustomerLocation(
               customerId = customerId,
@@ -612,12 +622,19 @@ class MainScreenViewModel(
             )
           } else {
             val geocoded = dataRepository.geocodeAddress(addressInput)
+            val fallbackLoc = _uiState.value.currentLocation
+            val finalLat =
+              if (geocoded.latitude != 0.0 || geocoded.longitude != 0.0) geocoded.latitude
+              else (fallbackLoc?.latitude ?: 0.0)
+            val finalLon =
+              if (geocoded.latitude != 0.0 || geocoded.longitude != 0.0) geocoded.longitude
+              else (fallbackLoc?.longitude ?: 0.0)
             dataRepository.addCustomerLocation(
               customerId = customerId,
               label = cleanLabel,
               address = geocoded.formattedAddress,
-              latitude = geocoded.latitude,
-              longitude = geocoded.longitude,
+              latitude = finalLat,
+              longitude = finalLon,
             )
           }
 

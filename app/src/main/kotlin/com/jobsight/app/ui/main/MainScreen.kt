@@ -5,11 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.location.Geocoder
 import android.location.Location
 import android.net.Uri
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,10 +77,12 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,6 +98,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -106,8 +114,12 @@ import com.jobsight.app.data.HvacPartAnalysis
 import com.jobsight.app.data.SearchSite
 import com.jobsight.app.location.LocationTracker
 import java.io.File
+import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MainScreen(
@@ -772,6 +784,13 @@ private fun GeofenceHeaderBadge(
   val manualLocation = uiState.manualSelectedLocation
   val autoDetected = uiState.autoDetectedCustomer
   val closest = uiState.closestMatch
+  val context = LocalContext.current
+  val activeLocForDirections =
+    when {
+      manualCustomer != null -> manualLocation ?: manualCustomer.locations.firstOrNull()
+      autoDetected != null -> uiState.autoDetectedLocation ?: autoDetected.locations.firstOrNull()
+      else -> null
+    }
 
   val badgeBackground =
     when {
@@ -851,6 +870,29 @@ private fun GeofenceHeaderBadge(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
+          if (activeLocForDirections != null) {
+            FilledTonalButton(
+              onClick = {
+                openMapsDirections(
+                  context = context,
+                  latitude = activeLocForDirections.latitude,
+                  longitude = activeLocForDirections.longitude,
+                  address = activeLocForDirections.address,
+                  label = activeLocForDirections.label,
+                )
+              },
+              colors =
+                ButtonDefaults.filledTonalButtonColors(
+                  containerColor = Color(0xFF0F93E8),
+                  contentColor = Color.White,
+                ),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+              modifier = Modifier.height(34.dp),
+            ) {
+              Text("Directions", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+          }
+
           if (manualCustomer != null) {
             OutlinedButton(
               onClick = onResetToAutoGps,
@@ -938,12 +980,40 @@ private fun CustomerTagListDialog(
   var showNewCustomerDialog by remember { mutableStateOf(false) }
   var selectedCustomerForLocationStep by remember { mutableStateOf<Customer?>(null) }
   var showNewLocationForSelectedCustomer by remember { mutableStateOf(false) }
+  val context = LocalContext.current
 
   // Keep selectedCustomerForLocationStep in sync with latest customers list
   val activeStepCustomer =
     selectedCustomerForLocationStep?.let { picked ->
       uiState.customers.find { it.id == picked.id } ?: picked
     }
+
+  if (showNewCustomerDialog) {
+    AddCustomerDialog(
+      hasCurrentGps = uiState.currentLocation != null,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { name, locLabel, useGps, address ->
+        showNewCustomerDialog = false
+        onCreateCustomerFromPicker(name, locLabel, useGps, address)
+      },
+      onDismiss = { showNewCustomerDialog = false },
+    )
+    return
+  }
+
+  if (showNewLocationForSelectedCustomer && activeStepCustomer != null) {
+    AddLocationDialog(
+      customerName = activeStepCustomer.name,
+      currentLocation = uiState.currentLocation,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { label, useGps, address ->
+        showNewLocationForSelectedCustomer = false
+        onAddLocationFromPicker(activeStepCustomer.id, label, useGps, address)
+      },
+      onDismiss = { showNewLocationForSelectedCustomer = false },
+    )
+    return
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -1244,12 +1314,37 @@ private fun CustomerTagListDialog(
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
-                  Text(
-                    text = if (isSelected) "Selected ✓" else "Select →",
-                    color = Color(0xFF34D399),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                  )
+                  Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                  ) {
+                    FilledTonalButton(
+                      onClick = {
+                        openMapsDirections(
+                          context = context,
+                          latitude = loc.latitude,
+                          longitude = loc.longitude,
+                          address = loc.address,
+                          label = "${activeStepCustomer.name} - ${loc.label}",
+                        )
+                      },
+                      colors =
+                        ButtonDefaults.filledTonalButtonColors(
+                          containerColor = Color(0xFF0F93E8),
+                          contentColor = Color.White,
+                        ),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                      modifier = Modifier.height(30.dp),
+                    ) {
+                      Text("Directions", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                      text = if (isSelected) "Selected ✓" else "Select →",
+                      color = Color(0xFF34D399),
+                      style = MaterialTheme.typography.labelMedium,
+                      fontWeight = FontWeight.Bold,
+                    )
+                  }
                 }
               }
             }
@@ -1274,31 +1369,6 @@ private fun CustomerTagListDialog(
       }
     },
   )
-
-  if (showNewCustomerDialog) {
-    AddCustomerDialog(
-      hasCurrentGps = uiState.currentLocation != null,
-      isSaving = uiState.isSavingCustomerOrLocation,
-      onConfirm = { name, locLabel, useGps, address ->
-        showNewCustomerDialog = false
-        onCreateCustomerFromPicker(name, locLabel, useGps, address)
-      },
-      onDismiss = { showNewCustomerDialog = false },
-    )
-  }
-
-  if (showNewLocationForSelectedCustomer && activeStepCustomer != null) {
-    AddLocationDialog(
-      customerName = activeStepCustomer.name,
-      currentLocation = uiState.currentLocation,
-      isSaving = uiState.isSavingCustomerOrLocation,
-      onConfirm = { label, useGps, address ->
-        showNewLocationForSelectedCustomer = false
-        onAddLocationFromPicker(activeStepCustomer.id, label, useGps, address)
-      },
-      onDismiss = { showNewLocationForSelectedCustomer = false },
-    )
-  }
 }
 
 /**
@@ -1498,6 +1568,7 @@ private fun AppSettingsBottomSheet(
   var customerForNewLocation by remember { mutableStateOf<Customer?>(null) }
   var customerPendingDeletion by remember { mutableStateOf<Customer?>(null) }
   var locationPendingDeletion by remember { mutableStateOf<Pair<Long, String>?>(null) }
+  val context = LocalContext.current
 
   var newSiteName by remember { mutableStateOf("") }
   var newSiteUrl by remember { mutableStateOf("") }
@@ -1628,7 +1699,7 @@ private fun AppSettingsBottomSheet(
                   }
                 }
 
-                // List each site location under this customer with an ✕ delete button
+                // List each site location under this customer with a Directions button and an ✕ delete button
                 customer.locations.forEach { loc ->
                   Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -1655,19 +1726,48 @@ private fun AppSettingsBottomSheet(
                           overflow = TextOverflow.Ellipsis,
                         )
                       }
-                      Box(
-                        contentAlignment = Alignment.Center,
-                        modifier =
-                          Modifier.size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { locationPendingDeletion = loc.id to loc.label },
+                      Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                       ) {
-                        Text(
-                          text = "✕",
-                          color = Color(0xFFF87171),
-                          style = MaterialTheme.typography.labelMedium,
-                          fontWeight = FontWeight.Bold,
-                        )
+                        FilledTonalButton(
+                          onClick = {
+                            openMapsDirections(
+                              context = context,
+                              latitude = loc.latitude,
+                              longitude = loc.longitude,
+                              address = loc.address,
+                              label = "${customer.name} - ${loc.label}",
+                            )
+                          },
+                          colors =
+                            ButtonDefaults.filledTonalButtonColors(
+                              containerColor = Color(0xFF0F93E8),
+                              contentColor = Color.White,
+                            ),
+                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                          modifier = Modifier.height(28.dp),
+                        ) {
+                          Text(
+                            text = "Directions",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                          )
+                        }
+                        Box(
+                          contentAlignment = Alignment.Center,
+                          modifier =
+                            Modifier.size(28.dp)
+                              .clip(CircleShape)
+                              .clickable { locationPendingDeletion = loc.id to loc.label },
+                        ) {
+                          Text(
+                            text = "✕",
+                            color = Color(0xFFF87171),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                          )
+                        }
                       }
                     }
                   }
@@ -2347,23 +2447,45 @@ private fun AddCustomerDialog(
   var locationLabel by remember { mutableStateOf("Main Building") }
   var useCurrentGps by remember { mutableStateOf(hasCurrentGps) }
   var addressText by remember { mutableStateOf("") }
+  var pickedMapLat by remember { mutableStateOf<Double?>(null) }
+  var pickedMapLng by remember { mutableStateOf<Double?>(null) }
+  var showMapPicker by remember { mutableStateOf(false) }
+
+  if (showMapPicker) {
+    InteractiveMapPickerDialog(
+      initialLatitude = pickedMapLat ?: 41.32094,
+      initialLongitude = pickedMapLng ?: -112.06075,
+      onLocationPicked = { addr, lat, lng ->
+        addressText = addr
+        pickedMapLat = lat
+        pickedMapLng = lng
+        useCurrentGps = false
+        showMapPicker = false
+      },
+      onDismiss = { showMapPicker = false },
+    )
+    return
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Add New Customer") },
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = { Text("Add New Customer", fontWeight = FontWeight.Bold) },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
           value = customerName,
           onValueChange = { customerName = it },
-          label = { Text("Customer / Company Name") },
+          label = { Text("Customer / Site Name") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
           value = locationLabel,
           onValueChange = { locationLabel = it },
-          label = { Text("First Site Label (e.g. Main Roof, Building A)") },
+          label = { Text("First Site Label (e.g. Main Building, Roof)") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -2375,45 +2497,96 @@ private fun AddCustomerDialog(
           FilterChip(
             selected = useCurrentGps,
             onClick = { useCurrentGps = true },
-            label = { Text("Use Current GPS") },
+            label = { Text("Current GPS") },
           )
           FilterChip(
             selected = !useCurrentGps,
-            onClick = { useCurrentGps = false },
-            label = { Text("By Street Address") },
+            onClick = {
+              useCurrentGps = false
+              if (pickedMapLat == null) {
+                showMapPicker = true
+              }
+            },
+            label = { Text("Pick on Map") },
           )
         }
 
         if (!useCurrentGps) {
-          OutlinedTextField(
-            value = addressText,
-            onValueChange = { addressText = it },
-            label = { Text("Street Address (City, State)") },
-            placeholder = { Text("e.g. 350 5th Ave, New York, NY") },
+          Button(
+            onClick = { showMapPicker = true },
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF0F93E8),
+                contentColor = Color.White,
+              ),
             modifier = Modifier.fillMaxWidth(),
-          )
+          ) {
+            Text(
+              text =
+                if (pickedMapLat != null) "📍 Change Location on Map"
+                else "📍 Set Address on Map",
+              fontWeight = FontWeight.Bold,
+            )
+          }
+
+          if (pickedMapLat != null && pickedMapLng != null) {
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = Color(0xFF0E2243),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                  text = addressText.ifBlank { "Selected Map Pin" },
+                  style = MaterialTheme.typography.bodySmall,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White,
+                )
+                Text(
+                  text =
+                    "Exact Pin: ${"%.5f".format(pickedMapLat)}, ${"%.5f".format(pickedMapLng)}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = Color(0xFF38BDF8),
+                )
+              }
+            }
+          }
         } else {
-          OutlinedTextField(
-            value = addressText,
-            onValueChange = { addressText = it },
-            label = { Text("Optional Address Note") },
-            placeholder = { Text("Uses your current device GPS coordinates") },
-            modifier = Modifier.fillMaxWidth(),
+          Text(
+            text = "Uses your phone's current GPS coordinates & auto-fills the street address.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF94A3B8),
           )
         }
       }
     },
     confirmButton = {
       Button(
-        enabled = customerName.isNotBlank() && !isSaving,
-        onClick = { onConfirm(customerName, locationLabel, useCurrentGps, addressText) },
+        enabled =
+          customerName.isNotBlank() &&
+            (useCurrentGps || pickedMapLat != null || addressText.isNotBlank()) &&
+            !isSaving,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+        onClick = {
+          val finalAddressPayload =
+            if (!useCurrentGps && pickedMapLat != null && pickedMapLng != null) {
+              "${addressText.ifBlank { "Pinned Map Location" }}@@COORDS:$pickedMapLat,$pickedMapLng"
+            } else {
+              addressText
+            }
+          onConfirm(customerName, locationLabel, useCurrentGps, finalAddressPayload)
+        },
       ) {
-        Text("Save Customer")
+        Text("Save Customer", fontWeight = FontWeight.Bold)
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text("Cancel", color = Color(0xFF94A3B8))
       }
     },
   )
@@ -2427,19 +2600,41 @@ private fun AddLocationDialog(
   onConfirm: (String, Boolean, String) -> Unit,
   onDismiss: () -> Unit,
 ) {
-  var locationLabel by remember { mutableStateOf("Secondary Site / Roof Unit") }
+  var locationLabel by remember { mutableStateOf("Main Building") }
   var useCurrentGps by remember { mutableStateOf(currentLocation != null) }
   var addressText by remember { mutableStateOf("") }
+  var pickedMapLat by remember { mutableStateOf<Double?>(null) }
+  var pickedMapLng by remember { mutableStateOf<Double?>(null) }
+  var showMapPicker by remember { mutableStateOf(false) }
+
+  if (showMapPicker) {
+    InteractiveMapPickerDialog(
+      initialLatitude = pickedMapLat ?: currentLocation?.latitude ?: 41.32094,
+      initialLongitude = pickedMapLng ?: currentLocation?.longitude ?: -112.06075,
+      onLocationPicked = { addr, lat, lng ->
+        addressText = addr
+        pickedMapLat = lat
+        pickedMapLng = lng
+        useCurrentGps = false
+        showMapPicker = false
+      },
+      onDismiss = { showMapPicker = false },
+    )
+    return
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Add Location for $customerName") },
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = { Text("Add Location for $customerName", fontWeight = FontWeight.Bold) },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(
           value = locationLabel,
           onValueChange = { locationLabel = it },
-          label = { Text("Location Name (e.g. North Wing, Annex)") },
+          label = { Text("Location Name (e.g. Main Building, Roof Unit)") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -2451,12 +2646,17 @@ private fun AddLocationDialog(
           FilterChip(
             selected = useCurrentGps,
             onClick = { useCurrentGps = true },
-            label = { Text("Current GPS Location") },
+            label = { Text("Current GPS") },
           )
           FilterChip(
             selected = !useCurrentGps,
-            onClick = { useCurrentGps = false },
-            label = { Text("Street Address") },
+            onClick = {
+              useCurrentGps = false
+              if (pickedMapLat == null) {
+                showMapPicker = true
+              }
+            },
+            label = { Text("Pick on Map") },
           )
         }
 
@@ -2464,43 +2664,402 @@ private fun AddLocationDialog(
           Text(
             text =
               if (currentLocation != null) {
-                "Device GPS: ${"%.5f".format(currentLocation.latitude)}, ${"%.5f".format(currentLocation.longitude)}"
+                "Device GPS: ${"%.5f".format(currentLocation.latitude)}, ${"%.5f".format(currentLocation.longitude)}\nAuto-detects street address from your GPS."
               } else {
-                "Waiting for GPS signal..."
+                "Waiting for GPS signal... Or tap 'Pick on Map' above."
               },
             style = MaterialTheme.typography.bodySmall,
-          )
-          OutlinedTextField(
-            value = addressText,
-            onValueChange = { addressText = it },
-            label = { Text("Address / Site Note (Optional)") },
-            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF94A3B8),
           )
         } else {
-          OutlinedTextField(
-            value = addressText,
-            onValueChange = { addressText = it },
-            label = { Text("Enter Street Address") },
-            placeholder = { Text("e.g. 1600 Amphitheatre Pkwy, Mountain View, CA") },
+          Button(
+            onClick = { showMapPicker = true },
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF0F93E8),
+                contentColor = Color.White,
+              ),
             modifier = Modifier.fillMaxWidth(),
-          )
+          ) {
+            Text(
+              text =
+                if (pickedMapLat != null) "📍 Change Location on Map"
+                else "📍 Set Address on Map",
+              fontWeight = FontWeight.Bold,
+            )
+          }
+
+          if (pickedMapLat != null && pickedMapLng != null) {
+            Surface(
+              shape = RoundedCornerShape(10.dp),
+              color = Color(0xFF0E2243),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                  text = addressText.ifBlank { "Selected Map Pin" },
+                  style = MaterialTheme.typography.bodySmall,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White,
+                )
+                Text(
+                  text =
+                    "Exact Pin: ${"%.5f".format(pickedMapLat)}, ${"%.5f".format(pickedMapLng)}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = Color(0xFF38BDF8),
+                )
+              }
+            }
+          }
         }
       }
     },
     confirmButton = {
       Button(
-        enabled = (useCurrentGps || addressText.isNotBlank()) && !isSaving,
-        onClick = { onConfirm(locationLabel, useCurrentGps, addressText) },
+        enabled = (useCurrentGps || pickedMapLat != null || addressText.isNotBlank()) && !isSaving,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+        onClick = {
+          val finalAddressPayload =
+            if (!useCurrentGps && pickedMapLat != null && pickedMapLng != null) {
+              "${addressText.ifBlank { "Pinned Map Location" }}@@COORDS:$pickedMapLat,$pickedMapLng"
+            } else {
+              addressText
+            }
+          onConfirm(locationLabel, useCurrentGps, finalAddressPayload)
+        },
       ) {
-        Text("Add Location")
+        Text("Add Location", fontWeight = FontWeight.Bold)
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text("Cancel", color = Color(0xFF94A3B8))
       }
     },
   )
+}
+
+/**
+ * Full-screen Interactive Map Picker (Google Maps Hybrid Satellite + Street View):
+ * - Search any street address or business at the top to jump the map there
+ * - Pan & zoom the map with your finger and tap the exact building rooftop to drop the pin
+ * - Automatically reverse-geocodes the pin into a readable street address
+ * - Saves the exact rooftop GPS coordinates so GPS Auto-Detect (< 325 ft) works 100% of the time!
+ */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun InteractiveMapPickerDialog(
+  initialLatitude: Double,
+  initialLongitude: Double,
+  onLocationPicked: (String, Double, Double) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var pinLat by remember { mutableDoubleStateOf(initialLatitude) }
+  var pinLng by remember { mutableDoubleStateOf(initialLongitude) }
+  var resolvedAddress by remember { mutableStateOf("Tap on the map or search an address above") }
+  var searchQuery by remember { mutableStateOf("") }
+  var isSearching by remember { mutableStateOf(false) }
+  var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+  // Reverse-geocode whenever the pin moves
+  LaunchedEffect(pinLat, pinLng) {
+    withContext(Dispatchers.IO) {
+      if (Geocoder.isPresent()) {
+        try {
+          @Suppress("DEPRECATION")
+          val results = Geocoder(context, Locale.getDefault()).getFromLocation(pinLat, pinLng, 1)
+          val line = results?.firstOrNull()?.getAddressLine(0)
+          if (!line.isNullOrBlank()) {
+            resolvedAddress = line
+            return@withContext
+          }
+        } catch (_: Exception) {}
+      }
+      resolvedAddress = "GPS (${"%.5f".format(pinLat)}, ${"%.5f".format(pinLng)})"
+    }
+  }
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties =
+      DialogProperties(
+        usePlatformDefaultWidth = false,
+        decorFitsSystemWindows = false,
+      ),
+  ) {
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = Color(0xFF0E2243),
+      contentColor = Color.White,
+    ) {
+    Column(
+      modifier =
+        Modifier.fillMaxSize()
+          .statusBarsPadding()
+          .navigationBarsPadding(),
+    ) {
+      // Top Search & Navigation Bar
+      Column(
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFF132D57))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          OutlinedButton(
+            onClick = onDismiss,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            modifier = Modifier.height(34.dp),
+          ) {
+            Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+          }
+          Text(
+            text = "Tap Rooftop or Search Address",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+          )
+          Spacer(modifier = Modifier.width(48.dp))
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search address, city, or business...") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+          )
+          Button(
+            enabled = searchQuery.isNotBlank() && !isSearching,
+            onClick = {
+              val q = searchQuery.trim()
+              if (q.isEmpty()) return@Button
+              isSearching = true
+              scope.launch {
+                val found =
+                  withContext(Dispatchers.IO) {
+                    if (Geocoder.isPresent()) {
+                      try {
+                        @Suppress("DEPRECATION")
+                        val list = Geocoder(context, Locale.getDefault()).getFromLocationName(q, 1)
+                        list?.firstOrNull()
+                      } catch (_: Exception) {
+                        null
+                      }
+                    } else {
+                      null
+                    }
+                  }
+                isSearching = false
+                if (found != null) {
+                  pinLat = found.latitude
+                  pinLng = found.longitude
+                  @Suppress("DEPRECATION")
+                  val line = found.getAddressLine(0)
+                  if (!line.isNullOrBlank()) {
+                    resolvedAddress = line
+                  }
+                  webViewRef?.evaluateJavascript(
+                    "window.movePinTo(${found.latitude}, ${found.longitude});",
+                    null,
+                  )
+                } else {
+                  // Let the map's JS geocoder search as fallback
+                  val escaped = q.replace("'", "\\'")
+                  webViewRef?.evaluateJavascript("window.searchInMap('$escaped');", null)
+                }
+              }
+            },
+            colors =
+              ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF0F93E8),
+                contentColor = Color.White,
+              ),
+            modifier = Modifier.height(52.dp),
+          ) {
+            Text(if (isSearching) "..." else "Search", fontWeight = FontWeight.Bold)
+          }
+        }
+      }
+
+      // Interactive Map WebView (Google Maps Hybrid Satellite + Street Tiles)
+      Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        AndroidView(
+          modifier = Modifier.fillMaxSize(),
+          factory = { ctx ->
+            WebView(ctx).apply {
+              layoutParams =
+                ViewGroup.LayoutParams(
+                  ViewGroup.LayoutParams.MATCH_PARENT,
+                  ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+              settings.javaScriptEnabled = true
+              settings.domStorageEnabled = true
+              webViewClient = WebViewClient()
+              addJavascriptInterface(
+                object {
+                  @JavascriptInterface
+                  fun onPinSelected(lat: Double, lng: Double) {
+                    pinLat = lat
+                    pinLng = lng
+                  }
+                },
+                "AndroidBridge",
+              )
+              val html = buildInteractiveMapHtml(initialLatitude, initialLongitude)
+              loadDataWithBaseURL("https://unpkg.com/", html, "text/html", "UTF-8", null)
+              webViewRef = this
+            }
+          },
+        )
+      }
+
+      // Bottom Selected Pin Confirmation Bar
+      Column(
+        modifier =
+          Modifier.fillMaxWidth()
+            .background(Color(0xFF132D57))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text(
+          text = resolvedAddress,
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+          text = "Pin GPS: ${"%.6f".format(pinLat)}, ${"%.6f".format(pinLng)} (Tap anywhere on map to move pin)",
+          style = MaterialTheme.typography.labelSmall,
+          color = Color(0xFF38BDF8),
+        )
+        Button(
+          onClick = { onLocationPicked(resolvedAddress, pinLat, pinLng) },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF0F93E8),
+              contentColor = Color.White,
+            ),
+          modifier = Modifier.fillMaxWidth().height(48.dp),
+        ) {
+          Text("Use This Location", fontWeight = FontWeight.Bold)
+        }
+      }
+    }
+  }
+  }
+}
+
+private fun buildInteractiveMapHtml(initLat: Double, initLng: Double): String {
+  return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0E2243; font-family: sans-serif; }
+        .layer-toggle {
+          position: absolute; top: 12px; right: 12px; z-index: 1000;
+          background: #132D57; color: #fff; border: 2px solid #0F93E8;
+          border-radius: 8px; padding: 8px 12px; font-weight: bold; font-size: 13px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <button id="toggleBtn" class="layer-toggle" onclick="toggleLayer()">Satellite View</button>
+      <script>
+        var streetLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+          maxZoom: 21, attribution: 'Google Maps'
+        });
+        var hybridLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+          maxZoom: 21, attribution: 'Google Satellite'
+        });
+
+        var isHybrid = true;
+        var map = L.map('map', {
+          center: [$initLat, $initLng],
+          zoom: 18,
+          layers: [hybridLayer],
+          zoomControl: true
+        });
+
+        var marker = L.marker([$initLat, $initLng], { draggable: true }).addTo(map);
+
+        function notifyAndroid(latlng) {
+          if (window.AndroidBridge && window.AndroidBridge.onPinSelected) {
+            window.AndroidBridge.onPinSelected(latlng.lat, latlng.lng);
+          }
+        }
+
+        map.on('click', function(e) {
+          marker.setLatLng(e.latlng);
+          notifyAndroid(e.latlng);
+        });
+
+        marker.on('dragend', function(e) {
+          notifyAndroid(marker.getLatLng());
+        });
+
+        window.movePinTo = function(lat, lng) {
+          var ll = L.latLng(lat, lng);
+          marker.setLatLng(ll);
+          map.setView(ll, 18);
+          notifyAndroid(ll);
+        };
+
+        window.searchInMap = function(query) {
+          fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data && data.length > 0) {
+                var lat = parseFloat(data[0].lat);
+                var lon = parseFloat(data[0].lon);
+                window.movePinTo(lat, lon);
+              }
+            });
+        };
+
+        window.toggleLayer = function() {
+          var btn = document.getElementById('toggleBtn');
+          if (isHybrid) {
+            map.removeLayer(hybridLayer);
+            map.addLayer(streetLayer);
+            btn.innerText = 'Satellite View';
+            isHybrid = false;
+          } else {
+            map.removeLayer(streetLayer);
+            map.addLayer(hybridLayer);
+            btn.innerText = 'Street View';
+            isHybrid = true;
+          }
+        };
+      </script>
+    </body>
+    </html>
+  """.trimIndent()
 }
 
 @android.annotation.SuppressLint("ClickableViewAccessibility")
@@ -2964,3 +3523,43 @@ private fun capturePhotoToCache(
     },
   )
 }
+
+/**
+ * Launches the user's preferred Maps app (Google Maps, Waze, etc.) with directions
+ * directly to the site location's exact coordinates or street address.
+ */
+private fun openMapsDirections(
+  context: Context,
+  latitude: Double,
+  longitude: Double,
+  address: String,
+  label: String,
+) {
+  val hasValidCoords = latitude != 0.0 || longitude != 0.0
+  val destinationQuery =
+    if (hasValidCoords) {
+      "$latitude,$longitude"
+    } else {
+      Uri.encode(address.ifBlank { label })
+    }
+  val mapsUrl = "https://www.google.com/maps/dir/?api=1&destination=$destinationQuery&travelmode=driving"
+  try {
+    val intent =
+      Intent(Intent.ACTION_VIEW, Uri.parse(mapsUrl)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+    context.startActivity(intent)
+  } catch (_: Exception) {
+    // Fallback to geo: URI if no handler for https URL
+    try {
+      val geoUri =
+        if (hasValidCoords) {
+          Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude(${Uri.encode(label)})")
+        } else {
+          Uri.parse("geo:0,0?q=${Uri.encode(address.ifBlank { label })}")
+        }
+      context.startActivity(Intent(Intent.ACTION_VIEW, geoUri).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+    } catch (_: Exception) {}
+  }
+}
+

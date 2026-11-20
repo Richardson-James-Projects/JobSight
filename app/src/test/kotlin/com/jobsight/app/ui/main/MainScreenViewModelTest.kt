@@ -186,6 +186,11 @@ private class FakeJobSightRepository : DataRepository {
   override suspend fun geocodeAddress(addressQuery: String): ResolvedAddress =
     ResolvedAddress(addressQuery, 37.422, -122.084)
 
+  override suspend fun reverseGeocodeCoordinates(
+    latitude: Double,
+    longitude: Double,
+  ): String? = null
+
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> = emptyList()
 
   override suspend fun deletePhotos(photos: List<CapturedPhotoRow>) {}
