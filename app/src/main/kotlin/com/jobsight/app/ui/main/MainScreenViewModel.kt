@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jobsight.app.data.AnalysisJsonParser
 import com.jobsight.app.data.CapturedPhotoRow
+import com.jobsight.app.data.CompanySession
 import com.jobsight.app.data.Customer
 import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.CustomerMatch
@@ -24,6 +25,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class FieldCameraUiState(
+  val isCheckingAuthSession: Boolean = true,
+  val companySession: CompanySession? = null,
+  val isAuthenticatingCompany: Boolean = false,
+  val authErrorMessage: String? = null,
   val isLoadingCustomers: Boolean = true,
   val customers: List<Customer> = emptyList(),
   val currentLocation: Location? = null,
@@ -99,9 +104,85 @@ class MainScreenViewModel(
   private var pendingCachedPhotoFile: File? = null
 
   init {
-    refreshCustomers()
-    refreshSearchSites()
-    syncPendingOfflineUploads()
+    restoreCompanySession()
+  }
+
+  private fun restoreCompanySession() {
+    viewModelScope.launch {
+      val saved = dataRepository.getSavedCompanySession()
+      _uiState.update {
+        it.copy(
+          isCheckingAuthSession = false,
+          companySession = saved,
+        )
+      }
+      if (saved != null) {
+        refreshCustomers()
+        refreshSearchSites()
+        syncPendingOfflineUploads()
+      } else {
+        _uiState.update { it.copy(isLoadingCustomers = false) }
+      }
+    }
+  }
+
+  fun authenticateCompany(
+    companyName: String,
+    password: String,
+    isRegister: Boolean,
+  ) {
+    viewModelScope.launch {
+      _uiState.update {
+        it.copy(
+          isAuthenticatingCompany = true,
+          authErrorMessage = null,
+        )
+      }
+      try {
+        val session =
+          dataRepository.loginOrRegisterCompany(
+            companyName = companyName,
+            password = password,
+            isRegister = isRegister,
+          )
+        _uiState.update {
+          it.copy(
+            isAuthenticatingCompany = false,
+            companySession = session,
+            authErrorMessage = null,
+            customers = emptyList(),
+            customerPhotos = emptyList(),
+            manualCustomerOverrideId = null,
+            manualLocationOverrideId = null,
+            statusBannerMessage = "Signed in as ${session.companyName}",
+          )
+        }
+        refreshCustomers()
+        refreshSearchSites()
+        syncPendingOfflineUploads()
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(
+            isAuthenticatingCompany = false,
+            authErrorMessage = e.message ?: "Could not sign in",
+          )
+        }
+      }
+    }
+  }
+
+  fun signOutCompany() {
+    viewModelScope.launch {
+      dataRepository.signOutCompany()
+      _uiState.update {
+        FieldCameraUiState(
+          isCheckingAuthSession = false,
+          companySession = null,
+          isLoadingCustomers = false,
+          currentLocation = it.currentLocation,
+        )
+      }
+    }
   }
 
   fun syncPendingOfflineUploads() {

@@ -130,6 +130,14 @@ data class QueuedPhotoUpload(
   val capturedAt: String,
 )
 
+@Serializable
+data class CompanySession(
+  @SerialName("company_id") val companyId: String,
+  @SerialName("company_name") val companyName: String,
+  @SerialName("access_token") val accessToken: String,
+  @SerialName("refresh_token") val refreshToken: String,
+)
+
 data class ResolvedAddress(
   val formattedAddress: String,
   val latitude: Double,

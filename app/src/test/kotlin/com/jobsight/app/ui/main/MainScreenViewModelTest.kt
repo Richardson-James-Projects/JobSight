@@ -2,6 +2,7 @@ package com.jobsight.app.ui.main
 
 import com.jobsight.app.data.AnalysisJsonParser
 import com.jobsight.app.data.CapturedPhotoRow
+import com.jobsight.app.data.CompanySession
 import com.jobsight.app.data.Customer
 import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.CustomerMatch
@@ -134,6 +135,28 @@ private class FakeJobSightRepository : DataRepository {
           ),
       ),
     )
+
+  override suspend fun getSavedCompanySession(): CompanySession? =
+    CompanySession(
+      companyId = "test-company-uuid",
+      companyName = "Test HVAC Co",
+      accessToken = "fake-jwt",
+      refreshToken = "fake-refresh",
+    )
+
+  override suspend fun loginOrRegisterCompany(
+    companyName: String,
+    password: String,
+    isRegister: Boolean,
+  ): CompanySession =
+    CompanySession(
+      companyId = "test-company-uuid",
+      companyName = companyName,
+      accessToken = "fake-jwt",
+      refreshToken = "fake-refresh",
+    )
+
+  override suspend fun signOutCompany() {}
 
   override suspend fun getCustomers(): List<Customer> = customers
 

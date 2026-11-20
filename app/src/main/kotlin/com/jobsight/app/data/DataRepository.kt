@@ -44,6 +44,14 @@ sealed interface PhotoUploadOutcome {
 }
 
 interface DataRepository {
+  suspend fun getSavedCompanySession(): CompanySession?
+  suspend fun loginOrRegisterCompany(
+    companyName: String,
+    password: String,
+    isRegister: Boolean,
+  ): CompanySession
+  suspend fun signOutCompany()
+
   suspend fun getCustomers(): List<Customer>
   suspend fun createCustomer(name: String): Customer
   suspend fun deleteCustomer(customerId: Long)
@@ -106,15 +114,129 @@ class DefaultDataRepository(
   private val queueManifestFile: File?
     get() = appContext?.filesDir?.let { File(it, "pending_photo_queue.json") }
 
+  private val companySessionFile: File?
+    get() = appContext?.filesDir?.let { File(it, "company_session.json") }
+
+  @Volatile private var activeSession: CompanySession? = null
+
   private val customersCacheFile: File?
-    get() = appContext?.filesDir?.let { File(it, "cached_customers.json") }
+    get() {
+      val suffix = activeSession?.companyId ?: "default"
+      return appContext?.filesDir?.let { File(it, "cached_customers_$suffix.json") }
+    }
 
   private val searchSitesCacheFile: File?
-    get() = appContext?.filesDir?.let { File(it, "cached_search_sites.json") }
+    get() {
+      val suffix = activeSession?.companyId ?: "default"
+      return appContext?.filesDir?.let { File(it, "cached_search_sites_$suffix.json") }
+    }
+
+  private fun authBearerToken(): String = activeSession?.accessToken ?: apiKey
 
   companion object {
     private val queueMutex = Mutex()
   }
+
+  override suspend fun getSavedCompanySession(): CompanySession? =
+    withContext(Dispatchers.IO) {
+      val cached = activeSession
+      if (cached != null) return@withContext cached
+      val file = companySessionFile ?: return@withContext null
+      if (!file.exists()) return@withContext null
+      try {
+        val loaded = json.decodeFromString<CompanySession>(file.readText())
+        activeSession = loaded
+        // Attempt silent token refresh in background if online
+        tryRefreshSession(loaded) ?: loaded
+      } catch (_: Exception) {
+        null
+      }
+    }
+
+  private fun tryRefreshSession(session: CompanySession): CompanySession? {
+    return try {
+      val payload =
+        buildJsonObject {
+          put("refresh_token", session.refreshToken)
+        }
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/auth/v1/token?grant_type=refresh_token")
+          .header("apikey", apiKey)
+          .header("Content-Type", "application/json")
+          .post(payload.toString().toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return null
+        val body = response.body?.string().orEmpty()
+        val obj = json.parseToJsonElement(body).jsonObject
+        val newAccess = obj["access_token"]?.jsonPrimitive?.content ?: return null
+        val newRefresh = obj["refresh_token"]?.jsonPrimitive?.content ?: session.refreshToken
+        val updated =
+          session.copy(
+            accessToken = newAccess,
+            refreshToken = newRefresh,
+          )
+        activeSession = updated
+        companySessionFile?.writeText(json.encodeToString(updated))
+        updated
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  override suspend fun loginOrRegisterCompany(
+    companyName: String,
+    password: String,
+    isRegister: Boolean,
+  ): CompanySession =
+    withContext(Dispatchers.IO) {
+      val payload =
+        buildJsonObject {
+          put("action", if (isRegister) "register" else "login")
+          put("company_name", companyName.trim())
+          put("password", password)
+        }
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/functions/v1/company-auth")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .post(payload.toString().toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+          val errorMsg =
+            try {
+              json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.content
+            } catch (_: Exception) {
+              null
+            } ?: "Authentication failed (${response.code})"
+          throw IOException(errorMsg)
+        }
+        val session = json.decodeFromString<CompanySession>(body)
+        activeSession = session
+        try {
+          companySessionFile?.writeText(json.encodeToString(session))
+        } catch (_: Exception) {}
+        session
+      }
+    }
+
+  override suspend fun signOutCompany(): Unit =
+    withContext(Dispatchers.IO) {
+      activeSession = null
+      try {
+        companySessionFile?.takeIf { it.exists() }?.delete()
+      } catch (_: Exception) {}
+      Unit
+    }
 
   override suspend fun getCustomers(): List<Customer> =
     withContext(Dispatchers.IO) {
@@ -124,7 +246,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customers?select=$selectCols&order=id.asc")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .get()
           .build()
 
@@ -163,7 +285,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customers")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .header("Content-Type", "application/json")
           .header("Prefer", "return=representation")
           .post(payload.toRequestBody("application/json".toMediaType()))
@@ -184,7 +306,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customers?id=eq.$customerId")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .delete()
           .build()
 
@@ -218,7 +340,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customer_locations")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .header("Content-Type", "application/json")
           .header("Prefer", "return=representation")
           .post(payload.toRequestBody("application/json".toMediaType()))
@@ -239,7 +361,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/customer_locations?id=eq.$locationId")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .delete()
           .build()
 
@@ -318,7 +440,7 @@ class DefaultDataRepository(
             "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json&order=captured_at.desc,id.desc"
           )
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .get()
           .build()
 
@@ -365,7 +487,7 @@ class DefaultDataRepository(
           Request.Builder()
             .url("$supabaseUrl/rest/v1/captured_photos?id=in.($idsCsv)")
             .header("apikey", apiKey)
-            .header("Authorization", "Bearer $apiKey")
+            .header("Authorization", "Bearer ${authBearerToken()}")
             .delete()
             .build()
 
@@ -385,7 +507,7 @@ class DefaultDataRepository(
                 Request.Builder()
                   .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
                   .header("apikey", apiKey)
-                  .header("Authorization", "Bearer $apiKey")
+                  .header("Authorization", "Bearer ${authBearerToken()}")
                   .delete()
                   .build()
               httpClient.newCall(storageDeleteReq).execute().close()
@@ -418,7 +540,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/search_sites?select=id,name,url_template&order=id.asc")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .get()
           .build()
 
@@ -472,7 +594,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/search_sites")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .header("Content-Type", "application/json")
           .header("Prefer", "return=representation")
           .post(payload.toRequestBody("application/json".toMediaType()))
@@ -493,7 +615,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/rest/v1/search_sites?id=eq.$siteId")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .delete()
           .build()
 
@@ -542,7 +664,7 @@ class DefaultDataRepository(
       Request.Builder()
         .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
         .header("apikey", apiKey)
-        .header("Authorization", "Bearer $apiKey")
+        .header("Authorization", "Bearer ${authBearerToken()}")
         .header("x-upsert", "true")
         .post(file.asRequestBody("image/jpeg".toMediaType()))
         .build()
@@ -569,7 +691,7 @@ class DefaultDataRepository(
       Request.Builder()
         .url("$supabaseUrl/rest/v1/captured_photos")
         .header("apikey", apiKey)
-        .header("Authorization", "Bearer $apiKey")
+        .header("Authorization", "Bearer ${authBearerToken()}")
         .header("Content-Type", "application/json")
         .header("Prefer", "return=representation")
         .post(insertBody.toRequestBody("application/json".toMediaType()))
@@ -595,7 +717,7 @@ class DefaultDataRepository(
         Request.Builder()
           .url("$supabaseUrl/functions/v1/analyze-job-photo")
           .header("apikey", apiKey)
-          .header("Authorization", "Bearer $apiKey")
+          .header("Authorization", "Bearer ${authBearerToken()}")
           .header("Content-Type", "application/json")
           .post(fnPayload.toString().toRequestBody("application/json".toMediaType()))
           .build()
@@ -785,7 +907,7 @@ class DefaultDataRepository(
           "$supabaseUrl/rest/v1/captured_photos?id=eq.$photoId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json"
         )
         .header("apikey", apiKey)
-        .header("Authorization", "Bearer $apiKey")
+        .header("Authorization", "Bearer ${authBearerToken()}")
         .get()
         .build()
 

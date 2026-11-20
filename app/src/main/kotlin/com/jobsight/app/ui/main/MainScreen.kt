@@ -87,6 +87,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -173,57 +175,252 @@ fun MainScreen(
   }
 
   Box(modifier = modifier.fillMaxSize().background(Color(0xFF0E2243))) {
-    FieldCameraContent(
-      uiState = uiState,
-      hasCameraPermission = hasCameraPermission,
-      hasLocationPermission = hasLocationPermission,
-      onRequestPermissions = {
-        permissionLauncher.launch(
-          arrayOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
+    if (!uiState.isCheckingAuthSession && uiState.companySession == null) {
+      CompanyAuthScreen(
+        isAuthenticating = uiState.isAuthenticatingCompany,
+        errorMessage = uiState.authErrorMessage,
+        onAuthenticate = viewModel::authenticateCompany,
+      )
+    } else {
+      FieldCameraContent(
+        uiState = uiState,
+        hasCameraPermission = hasCameraPermission,
+        hasLocationPermission = hasLocationPermission,
+        onRequestPermissions = {
+          permissionLauncher.launch(
+            arrayOf(
+              Manifest.permission.CAMERA,
+              Manifest.permission.ACCESS_FINE_LOCATION,
+              Manifest.permission.ACCESS_COARSE_LOCATION,
+            )
           )
-        )
-      },
-      onPhotoCapturedToCache = viewModel::onPhotoCapturedToCache,
-      onOpenCustomerPicker = viewModel::openCustomerPicker,
-      onCloseCustomerPicker = viewModel::closeCustomerPicker,
-      onSelectCustomerManually = viewModel::selectCustomerManually,
-      onOpenCustomerHub = viewModel::openCustomerHub,
-      onCloseCustomerHub = viewModel::closeCustomerHub,
-      onSelectHubCustomer = viewModel::selectHubCustomer,
-      onCreateCustomer = viewModel::createNewCustomer,
-      onDeleteCustomer = viewModel::deleteCustomer,
-      onAddLocationToCustomer = { customerId, label, useGps, address ->
-        viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = false)
-      },
-      onAddAndSelectLocationForCustomer = { customerId, label, useGps, address ->
-        viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = true)
-      },
-      onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
-      onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
-      onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
-      onOpenSettingsSheet = viewModel::openSettingsSheet,
-      onCloseSettingsSheet = viewModel::closeSettingsSheet,
-      onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
-      onAddSearchSite = viewModel::addSearchSite,
-      onDeleteSearchSite = viewModel::deleteSearchSite,
-      onDeletePhotos = viewModel::deletePhotosForCurrentCustomer,
-      onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
-      onShowPartsForPhoto = viewModel::showPartsForPhoto,
-      onDismissBottomSheet = viewModel::dismissBottomSheet,
-      onReopenBottomSheet = viewModel::reopenBottomSheet,
-      onClearStatusBanner = viewModel::clearStatusBanner,
-      onDismissError = viewModel::clearError,
-      modifier = Modifier.fillMaxSize(),
-    )
+        },
+        onPhotoCapturedToCache = viewModel::onPhotoCapturedToCache,
+        onOpenCustomerPicker = viewModel::openCustomerPicker,
+        onCloseCustomerPicker = viewModel::closeCustomerPicker,
+        onSelectCustomerManually = viewModel::selectCustomerManually,
+        onOpenCustomerHub = viewModel::openCustomerHub,
+        onCloseCustomerHub = viewModel::closeCustomerHub,
+        onSelectHubCustomer = viewModel::selectHubCustomer,
+        onCreateCustomer = viewModel::createNewCustomer,
+        onDeleteCustomer = viewModel::deleteCustomer,
+        onAddLocationToCustomer = { customerId, label, useGps, address ->
+          viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = false)
+        },
+        onAddAndSelectLocationForCustomer = { customerId, label, useGps, address ->
+          viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = true)
+        },
+        onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
+        onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
+        onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
+        onOpenSettingsSheet = viewModel::openSettingsSheet,
+        onCloseSettingsSheet = viewModel::closeSettingsSheet,
+        onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
+        onAddSearchSite = viewModel::addSearchSite,
+        onDeleteSearchSite = viewModel::deleteSearchSite,
+        onDeletePhotos = viewModel::deletePhotosForCurrentCustomer,
+        onSignOutCompany = viewModel::signOutCompany,
+        onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
+        onShowPartsForPhoto = viewModel::showPartsForPhoto,
+        onDismissBottomSheet = viewModel::dismissBottomSheet,
+        onReopenBottomSheet = viewModel::reopenBottomSheet,
+        onClearStatusBanner = viewModel::clearStatusBanner,
+        onDismissError = viewModel::clearError,
+        modifier = Modifier.fillMaxSize(),
+      )
+    }
 
     AnimatedVisibility(
       visible = showLaunchSplash,
       modifier = Modifier.fillMaxSize(),
     ) {
       JobSightLaunchSplashScreen()
+    }
+  }
+}
+
+@Composable
+private fun CompanyAuthScreen(
+  isAuthenticating: Boolean,
+  errorMessage: String?,
+  onAuthenticate: (String, String, Boolean) -> Unit,
+) {
+  var selectedTab by remember { mutableIntStateOf(0) } // 0 = Sign In, 1 = Create Account
+  var companyName by remember { mutableStateOf("") }
+  var password by remember { mutableStateOf("") }
+  var confirmPassword by remember { mutableStateOf("") }
+  var showPassword by remember { mutableStateOf(false) }
+  var localValidationError by remember { mutableStateOf<String?>(null) }
+
+  val isCreateMode = selectedTab == 1
+
+  Column(
+    modifier =
+      Modifier.fillMaxSize()
+        .background(Color(0xFF0E2243))
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .padding(horizontal = 24.dp, vertical = 16.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
+  ) {
+    Image(
+      painter = painterResource(id = R.drawable.jobsight_logo_full),
+      contentDescription = "JobSight Logo",
+      contentScale = ContentScale.Fit,
+      modifier = Modifier.fillMaxWidth(0.68f).height(160.dp),
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Surface(
+      shape = RoundedCornerShape(16.dp),
+      color = Color(0xFF132D57),
+      modifier =
+        Modifier.fillMaxWidth()
+          .border(1.dp, Color(0xFF0F93E8), RoundedCornerShape(16.dp)),
+    ) {
+      Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        SecondaryTabRow(
+          selectedTabIndex = selectedTab,
+          containerColor = Color(0xFF0E2243),
+          contentColor = Color.White,
+        ) {
+          Tab(
+            selected = selectedTab == 0,
+            onClick = {
+              selectedTab = 0
+              localValidationError = null
+            },
+            text = { Text("Sign In", fontWeight = FontWeight.Bold) },
+          )
+          Tab(
+            selected = selectedTab == 1,
+            onClick = {
+              selectedTab = 1
+              localValidationError = null
+            },
+            text = { Text("Create Account", fontWeight = FontWeight.Bold) },
+          )
+        }
+
+        Text(
+          text =
+            if (isCreateMode) {
+              "Create a new HVAC Company account. Your company's customers, locations, and photos are completely private to your company."
+            } else {
+              "Enter your HVAC Company Name and Password to access your company's customers and field photos."
+            },
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFFC7D6EB),
+        )
+
+        OutlinedTextField(
+          value = companyName,
+          onValueChange = {
+            companyName = it
+            localValidationError = null
+          },
+          label = { Text("Company Name") },
+          placeholder = { Text("e.g. Apex Heating & Cooling") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+          value = password,
+          onValueChange = {
+            password = it
+            localValidationError = null
+          },
+          label = { Text("Password (min 6 chars)") },
+          singleLine = true,
+          visualTransformation =
+            if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+          trailingIcon = {
+            TextButton(onClick = { showPassword = !showPassword }) {
+              Text(
+                text = if (showPassword) "Hide" else "Show",
+                color = Color(0xFF38BDF8),
+                style = MaterialTheme.typography.labelSmall,
+              )
+            }
+          },
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (isCreateMode) {
+          OutlinedTextField(
+            value = confirmPassword,
+            onValueChange = {
+              confirmPassword = it
+              localValidationError = null
+            },
+            label = { Text("Confirm Password") },
+            singleLine = true,
+            visualTransformation =
+              if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+          )
+        }
+
+        val activeError = localValidationError ?: errorMessage
+        if (!activeError.isNullOrBlank()) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFF7F1D1D),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Text(
+              text = activeError,
+              color = Color.White,
+              style = MaterialTheme.typography.bodySmall,
+              modifier = Modifier.padding(10.dp),
+            )
+          }
+        }
+
+        Button(
+          enabled = !isAuthenticating && companyName.isNotBlank() && password.isNotBlank(),
+          onClick = {
+            if (companyName.trim().length < 2) {
+              localValidationError = "Company Name must be at least 2 characters."
+              return@Button
+            }
+            if (password.length < 6) {
+              localValidationError = "Password must be at least 6 characters."
+              return@Button
+            }
+            if (isCreateMode && password != confirmPassword) {
+              localValidationError = "Passwords do not match."
+              return@Button
+            }
+            onAuthenticate(companyName.trim(), password, isCreateMode)
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = if (isCreateMode) Color(0xFFEE4D38) else Color(0xFF0F93E8),
+              contentColor = Color.White,
+            ),
+          modifier = Modifier.fillMaxWidth().height(46.dp),
+        ) {
+          if (isAuthenticating) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(22.dp),
+              color = Color.White,
+              strokeWidth = 2.dp,
+            )
+          } else {
+            Text(
+              text = if (isCreateMode) "Create Company Account" else "Sign In to Company",
+              fontWeight = FontWeight.Bold,
+            )
+          }
+        }
+      }
     }
   }
 }
@@ -282,6 +479,7 @@ internal fun FieldCameraContent(
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit = {},
+  onSignOutCompany: () -> Unit = {},
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onDismissBottomSheet: () -> Unit,
@@ -524,6 +722,10 @@ internal fun FieldCameraContent(
         onAddSearchSite = onAddSearchSite,
         onDeleteSearchSite = onDeleteSearchSite,
         onSetGeofenceRadius = onSetGeofenceRadius,
+        onSignOutCompany = {
+          onCloseSettingsSheet()
+          onSignOutCompany()
+        },
         onClose = onCloseSettingsSheet,
       )
     }
@@ -1288,6 +1490,7 @@ private fun AppSettingsBottomSheet(
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
   onSetGeofenceRadius: (Float) -> Unit,
+  onSignOutCompany: () -> Unit,
   onClose: () -> Unit,
 ) {
   var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
@@ -1571,7 +1774,45 @@ private fun AppSettingsBottomSheet(
       }
 
       else -> {
-        // Tab 2: GPS & App Settings (Geofence Radius, etc.)
+        // Tab 2: GPS & App Settings (Company Account + Geofence Radius)
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = Color(0xFF132D57),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Text(
+              text = "HVAC Company Account",
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+            )
+            Text(
+              text =
+                "Signed in as: ${uiState.companySession?.companyName ?: "Active Company"}",
+              style = MaterialTheme.typography.bodyMedium,
+              color = Color(0xFF38BDF8),
+              fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+              text =
+                "All customers, locations, and photos are privately isolated to your company account.",
+              style = MaterialTheme.typography.bodySmall,
+              color = Color(0xFF94A3B8),
+            )
+            OutlinedButton(
+              onClick = onSignOutCompany,
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEE4D38)),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text("Sign Out / Switch Company", fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+
         Surface(
           shape = RoundedCornerShape(12.dp),
           color = Color(0xFF132D57),
