@@ -386,6 +386,10 @@ internal fun FieldCameraContent(
     CustomerTagListDialog(
       uiState = uiState,
       onSelectCustomerAndLocation = onSelectCustomerManually,
+      onCreateCustomerFromPicker = { name, locLabel, useGps, address ->
+        onCloseCustomerPicker()
+        onCreateCustomer(name, locLabel, useGps, address)
+      },
       onOpenSettingsClick = {
         onCloseCustomerPicker()
         onOpenSettingsSheet()
@@ -634,9 +638,12 @@ private fun GeofenceHeaderBadge(
 private fun CustomerTagListDialog(
   uiState: FieldCameraUiState,
   onSelectCustomerAndLocation: (Long?, Long?) -> Unit,
+  onCreateCustomerFromPicker: (String, String, Boolean, String) -> Unit,
   onOpenSettingsClick: () -> Unit,
   onDismiss: () -> Unit,
 ) {
+  var showNewCustomerDialog by remember { mutableStateOf(false) }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     containerColor = Color(0xFF1E293B),
@@ -646,7 +653,7 @@ private fun CustomerTagListDialog(
       Column {
         Text("Select Customer for Photo Tag", fontWeight = FontWeight.Bold)
         Text(
-          text = "Tap a customer site below to tag your photos",
+          text = "Tap a customer site below or create a new customer",
           style = MaterialTheme.typography.bodySmall,
           color = Color(0xFF94A3B8),
         )
@@ -657,6 +664,43 @@ private fun CustomerTagListDialog(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
+        // 0. "+ New Customer" option right in the list!
+        item {
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF064E3B),
+            modifier =
+              Modifier.fillMaxWidth()
+                .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
+                .clickable { showNewCustomerDialog = true },
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "+ New Customer",
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White,
+                )
+                Text(
+                  text = "Create customer at current GPS or by street address",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = Color(0xFFA7F3D0),
+                )
+              }
+              Text(
+                text = "Add →",
+                color = Color(0xFF34D399),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+              )
+            }
+          }
+        }
+
         // 1. Auto-Detect via GPS option
         item {
           val isAutoMode = uiState.manualCustomerOverrideId == null
@@ -807,6 +851,18 @@ private fun CustomerTagListDialog(
       }
     },
   )
+
+  if (showNewCustomerDialog) {
+    AddCustomerDialog(
+      hasCurrentGps = uiState.currentLocation != null,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { name, locLabel, useGps, address ->
+        showNewCustomerDialog = false
+        onCreateCustomerFromPicker(name, locLabel, useGps, address)
+      },
+      onDismiss = { showNewCustomerDialog = false },
+    )
+  }
 }
 
 /**

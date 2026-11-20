@@ -379,17 +379,28 @@ class MainScreenViewModel(
         }
 
         val refreshedCustomers = dataRepository.getCustomers()
+        val createdWithLocations =
+          refreshedCustomers.find { it.id == createdCustomer.id } ?: createdCustomer
         _uiState.update { state ->
           val updatedMatch =
             state.currentLocation?.let { loc ->
               LocationTracker.findClosestCustomer(loc, refreshedCustomers)
             }
+          val isAutoDetectedNow =
+            updatedMatch != null &&
+              updatedMatch.distanceMeters < state.geofenceRadiusMeters &&
+              updatedMatch.customer.id == createdCustomer.id
+
           state.copy(
             isSavingCustomerOrLocation = false,
             customers = refreshedCustomers,
             closestMatch = updatedMatch,
+            manualCustomerOverrideId =
+              if (isAutoDetectedNow) null else createdCustomer.id,
+            manualLocationOverrideId =
+              if (isAutoDetectedNow) null else createdWithLocations.locations.firstOrNull()?.id,
             selectedHubCustomerId = createdCustomer.id,
-            statusBannerMessage = "Added customer '${createdCustomer.name}'",
+            statusBannerMessage = "Added & selected customer '${createdCustomer.name}'",
           )
         }
         loadPhotosForCustomer(createdCustomer.id)
