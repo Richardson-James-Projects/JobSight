@@ -787,10 +787,10 @@ private fun GeofenceHeaderBadge(
   val closest = uiState.closestMatch
   val context = LocalContext.current
   val activeLocForDirections =
-    when {
-      manualCustomer != null -> manualLocation ?: manualCustomer.locations.firstOrNull()
-      autoDetected != null -> uiState.autoDetectedLocation ?: autoDetected.locations.firstOrNull()
-      else -> null
+    if (manualCustomer != null) {
+      manualLocation ?: manualCustomer.locations.firstOrNull()
+    } else {
+      null
     }
 
   val badgeBackground =
@@ -1320,42 +1320,12 @@ private fun CustomerTagListDialog(
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
-                  Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                  ) {
-                    FilledTonalButton(
-                      onClick = {
-                        openMapsDirections(
-                          context = context,
-                          latitude = loc.latitude,
-                          longitude = loc.longitude,
-                          address = loc.address,
-                          label = "${activeStepCustomer.name} - ${loc.label}",
-                        )
-                      },
-                      colors =
-                        ButtonDefaults.filledTonalButtonColors(
-                          containerColor = Color(0xFF0F93E8),
-                          contentColor = Color.White,
-                        ),
-                      contentPadding = PaddingValues(0.dp),
-                      modifier = Modifier.size(32.dp),
-                    ) {
-                      Icon(
-                        painter = painterResource(id = R.drawable.ic_directions),
-                        contentDescription = "Directions to ${loc.label}",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp),
-                      )
-                    }
-                    Text(
-                      text = if (isSelected) "Selected ✓" else "Select →",
-                      color = Color(0xFF34D399),
-                      style = MaterialTheme.typography.labelMedium,
-                      fontWeight = FontWeight.Bold,
-                    )
-                  }
+                  Text(
+                    text = if (isSelected) "Selected ✓" else "Select →",
+                    color = Color(0xFF34D399),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                  )
                 }
               }
             }
