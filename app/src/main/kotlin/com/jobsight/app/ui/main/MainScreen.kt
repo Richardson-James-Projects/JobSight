@@ -789,7 +789,7 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 6. Full-Screen Dedicated Settings View (Gear ⚙️: Customers, Locations, Search Sites, GPS Radius)
+  // 6. Full-Screen Dedicated Settings View (Settings: Customers, Locations, Search Sites, GPS Radius)
   if (uiState.isSettingsSheetVisible) {
     BackHandler(onBack = onCloseSettingsSheet)
     Surface(
@@ -1000,10 +1000,21 @@ private fun GeofenceHeaderBadge(
                 containerColor = Color(0xFF132D57),
                 contentColor = Color.White,
               ),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             modifier = Modifier.height(34.dp),
           ) {
-            Text("⚙ Settings", style = MaterialTheme.typography.labelSmall)
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              Icon(
+                painter = painterResource(id = R.drawable.ic_settings),
+                contentDescription = "Settings",
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+              )
+              Text("Settings", style = MaterialTheme.typography.labelSmall)
+            }
           }
         }
       }
@@ -1243,7 +1254,7 @@ private fun CustomerTagListDialog(
                     )
                   }
                   Text(
-                    text = if (isAutoMode) "Active ✓" else "Use →",
+                    text = if (isAutoMode) "Active" else "Use →",
                     color = Color(0xFF34D399),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
@@ -1276,7 +1287,12 @@ private fun CustomerTagListDialog(
                         .clip(CircleShape)
                         .clickable { customerSearchQuery = "" },
                   ) {
-                    Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_close),
+                      contentDescription = "Clear search",
+                      tint = Color(0xFF94A3B8),
+                      modifier = Modifier.size(16.dp),
+                    )
                   }
                 }
               },
@@ -1360,7 +1376,12 @@ private fun CustomerTagListDialog(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  Text("📋", style = MaterialTheme.typography.bodySmall)
+                  Icon(
+                    painter = painterResource(id = R.drawable.ic_note),
+                    contentDescription = "Notes",
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(14.dp),
+                  )
                   Text(
                     text = activeStepCustomer.notes,
                     color = Color(0xFFE2E8F0),
@@ -1491,17 +1512,28 @@ private fun CustomerTagListDialog(
                       overflow = TextOverflow.Ellipsis,
                     )
                     if (loc.notes.isNotBlank()) {
-                      Text(
-                        text = "📍 ${loc.notes}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFFDE68A),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                      )
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                      ) {
+                        Icon(
+                          painter = painterResource(id = R.drawable.ic_location),
+                          contentDescription = "Location Note",
+                          tint = Color(0xFFFDE68A),
+                          modifier = Modifier.size(12.dp),
+                        )
+                        Text(
+                          text = loc.notes,
+                          style = MaterialTheme.typography.labelSmall,
+                          color = Color(0xFFFDE68A),
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                        )
+                      }
                     }
                   }
                   Text(
-                    text = if (isSelected) "Selected ✓" else "Select →",
+                    text = if (isSelected) "Selected" else "Select →",
                     color = Color(0xFF34D399),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
@@ -1515,7 +1547,18 @@ private fun CustomerTagListDialog(
     },
     confirmButton = {
       TextButton(onClick = onOpenSettingsClick) {
-        Text("⚙ Settings", color = Color(0xFF38BDF8))
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Icon(
+            painter = painterResource(id = R.drawable.ic_settings),
+            contentDescription = "Settings",
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(14.dp),
+          )
+          Text("Settings", color = Color(0xFF38BDF8))
+        }
       }
     },
     dismissButton = {
@@ -1588,10 +1631,21 @@ private fun CustomerPhotosBottomSheet(
             containerColor = Color(0xFF132D57),
             contentColor = Color.White,
           ),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
         modifier = Modifier.height(36.dp),
       ) {
-        Text("⚙ Settings", style = MaterialTheme.typography.labelMedium)
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Icon(
+            painter = painterResource(id = R.drawable.ic_settings),
+            contentDescription = "Settings",
+            tint = Color.White,
+            modifier = Modifier.size(16.dp),
+          )
+          Text("Settings", style = MaterialTheme.typography.labelMedium)
+        }
       }
     }
 
@@ -1650,7 +1704,12 @@ private fun CustomerPhotosBottomSheet(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
-            Text(text = "📋", style = MaterialTheme.typography.bodySmall)
+            Icon(
+              painter = painterResource(id = R.drawable.ic_note),
+              contentDescription = "Notes",
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(16.dp),
+            )
             Text(
               text = selectedCustomer.notes.ifBlank { "Add customer notes (gate codes, dog warnings, contacts)..." },
               color = if (selectedCustomer.notes.isNotBlank()) Color.White else Color(0xFF94A3B8),
@@ -1755,7 +1814,12 @@ private fun CustomerPhotosBottomSheet(
                         .clip(CircleShape)
                         .clickable { pickerSearchQuery = "" },
                   ) {
-                    Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_close),
+                      contentDescription = "Clear search",
+                      tint = Color(0xFF94A3B8),
+                      modifier = Modifier.size(16.dp),
+                    )
                   }
                 }
               },
@@ -1809,7 +1873,7 @@ private fun CustomerPhotosBottomSheet(
                   )
                 }
                 Text(
-                  text = if (isSelected) "Viewing ✓" else "View →",
+                  text = if (isSelected) "Viewing" else "View →",
                   color = Color(0xFF34D399),
                   style = MaterialTheme.typography.labelMedium,
                   fontWeight = FontWeight.Bold,
@@ -1829,7 +1893,7 @@ private fun CustomerPhotosBottomSheet(
 }
 
 /**
- * Dedicated Settings Sheet (Gear ⚙️) for all configuration:
+ * Dedicated Settings Sheet for all configuration:
  * - Tab 0: Customers & Site Locations (Add Customer, Remove Customer, Add/Remove Site Locations)
  * - Tab 1: Search Sites (Add/Remove online part search websites)
  * - Tab 2: Field Preferences (GPS Auto-Detect Geofence Radius)
@@ -1901,12 +1965,23 @@ private fun AppSettingsBottomSheet(
       ) {
         Text("← Camera", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
       }
-      Text(
-        text = "⚙ JobSight Settings",
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        color = Color.White,
-      )
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Icon(
+          painter = painterResource(id = R.drawable.ic_settings),
+          contentDescription = "Settings",
+          tint = Color(0xFF38BDF8),
+          modifier = Modifier.size(24.dp),
+        )
+        Text(
+          text = "JobSight Settings",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+        )
+      }
       Spacer(modifier = Modifier.width(64.dp))
     }
 
@@ -1968,7 +2043,12 @@ private fun AppSettingsBottomSheet(
                     .clip(CircleShape)
                     .clickable { customerSearchQuery = "" },
               ) {
-                Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                Icon(
+                  painter = painterResource(id = R.drawable.ic_close),
+                  contentDescription = "Clear",
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(16.dp),
+                )
               }
             }
           },
@@ -2042,7 +2122,12 @@ private fun AppSettingsBottomSheet(
                       contentPadding = PaddingValues(0.dp),
                       modifier = Modifier.size(32.dp),
                     ) {
-                      Text("✕", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                      Icon(
+                        painter = painterResource(id = R.drawable.ic_close),
+                        contentDescription = "Delete Customer",
+                        tint = Color(0xFFF87171),
+                        modifier = Modifier.size(16.dp),
+                      )
                     }
                   }
                 }
@@ -2065,7 +2150,12 @@ private fun AppSettingsBottomSheet(
                       verticalAlignment = Alignment.CenterVertically,
                       horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                      Text("📋", style = MaterialTheme.typography.bodySmall)
+                      Icon(
+                    painter = painterResource(id = R.drawable.ic_note),
+                    contentDescription = "Notes",
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(14.dp),
+                  )
                       Text(
                         text = customer.notes.ifBlank { "Add customer notes (gate codes, dog warnings, contacts)..." },
                         color = if (customer.notes.isNotBlank()) Color.White else Color(0xFF94A3B8),
@@ -2086,7 +2176,7 @@ private fun AppSettingsBottomSheet(
                   }
                 }
 
-                // List each site location under this customer with a Directions button and an ✕ delete button
+                // List each site location under this customer with a Directions button and a delete button
                 customer.locations.forEach { loc ->
                   Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -2153,11 +2243,11 @@ private fun AppSettingsBottomSheet(
                                 .clip(CircleShape)
                                 .clickable { locationPendingDeletion = loc.id to loc.label },
                           ) {
-                            Text(
-                              text = "✕",
-                              color = Color(0xFFF87171),
-                              style = MaterialTheme.typography.labelMedium,
-                              fontWeight = FontWeight.Bold,
+                            Icon(
+                              painter = painterResource(id = R.drawable.ic_close),
+                              contentDescription = "Delete Location",
+                              tint = Color(0xFFF87171),
+                              modifier = Modifier.size(16.dp),
                             )
                           }
                         }
@@ -2172,7 +2262,12 @@ private fun AppSettingsBottomSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                       ) {
-                        Text("📍", style = MaterialTheme.typography.labelSmall)
+                        Icon(
+                          painter = painterResource(id = R.drawable.ic_location),
+                          contentDescription = "Location Note",
+                          tint = Color(0xFF38BDF8),
+                          modifier = Modifier.size(12.dp),
+                        )
                         Text(
                           text = loc.notes.ifBlank { "+ Location note (gate code, filter size...)" },
                           color = if (loc.notes.isNotBlank()) Color(0xFFE2E8F0) else Color(0xFF64748B),
@@ -2287,7 +2382,12 @@ private fun AppSettingsBottomSheet(
                   contentPadding = PaddingValues(0.dp),
                   modifier = Modifier.size(32.dp),
                 ) {
-                  Text("✕", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                  Icon(
+                    painter = painterResource(id = R.drawable.ic_close),
+                    contentDescription = "Delete Site",
+                    tint = Color(0xFFF87171),
+                    modifier = Modifier.size(16.dp),
+                  )
                 }
               }
             }
@@ -2618,7 +2718,12 @@ private fun CustomerPhotosSection(
                 .clip(CircleShape)
                 .clickable { searchQuery = "" },
           ) {
-            Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+            Icon(
+              painter = painterResource(id = R.drawable.ic_close),
+              contentDescription = "Clear search",
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(16.dp),
+            )
           }
         }
       },
@@ -2946,12 +3051,23 @@ private fun CustomerPhotosSection(
                     color = Color(0xCC0E2243),
                     modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
                   ) {
-                    Text(
-                      text = "🔍 Tap to Zoom",
-                      color = Color.White,
-                      style = MaterialTheme.typography.labelSmall,
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(4.dp),
                       modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
+                    ) {
+                      Icon(
+                        painter = painterResource(id = R.drawable.ic_search),
+                        contentDescription = "Zoom",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp),
+                      )
+                      Text(
+                        text = "Tap to Zoom",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                      )
+                    }
                   }
                 }
               }
@@ -3002,9 +3118,11 @@ private fun CustomerPhotosSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                   ) {
-                    Text(
-                      text = "📝",
-                      style = MaterialTheme.typography.bodyMedium,
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_note),
+                      contentDescription = "Note",
+                      tint = Color(0xFF38BDF8),
+                      modifier = Modifier.size(16.dp),
                     )
                     Text(
                       text = photo.notes.ifBlank { "Add technician note or caption..." },
@@ -3472,7 +3590,12 @@ private fun FullScreenPhotoViewerDialog(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  Text("📝", style = MaterialTheme.typography.bodySmall)
+                  Icon(
+                    painter = painterResource(id = R.drawable.ic_note),
+                    contentDescription = "Note",
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(16.dp),
+                  )
                   Text(
                     text = currentNote.ifBlank { "Tap to add technician note..." },
                     color = if (currentNote.isNotBlank()) Color.White else Color(0xFF94A3B8),
@@ -3705,12 +3828,23 @@ private fun AddCustomerDialog(
               ),
             modifier = Modifier.fillMaxWidth(),
           ) {
-            Text(
-              text =
-                if (pickedMapLat != null) "📍 Change Location on Map"
-                else "📍 Set Address on Map",
-              fontWeight = FontWeight.Bold,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                painter = painterResource(id = R.drawable.ic_location),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+              )
+              Text(
+                text =
+                  if (pickedMapLat != null) "Change Location on Map"
+                  else "Set Address on Map",
+                fontWeight = FontWeight.Bold,
+              )
+            }
           }
 
           if (pickedMapLat != null && pickedMapLng != null) {
@@ -3865,12 +3999,23 @@ private fun AddLocationDialog(
               ),
             modifier = Modifier.fillMaxWidth(),
           ) {
-            Text(
-              text =
-                if (pickedMapLat != null) "📍 Change Location on Map"
-                else "📍 Set Address on Map",
-              fontWeight = FontWeight.Bold,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                painter = painterResource(id = R.drawable.ic_location),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+              )
+              Text(
+                text =
+                  if (pickedMapLat != null) "Change Location on Map"
+                  else "Set Address on Map",
+                fontWeight = FontWeight.Bold,
+              )
+            }
           }
 
           if (pickedMapLat != null && pickedMapLng != null) {
@@ -4507,14 +4652,13 @@ private fun AiPartAnalysisBottomSheet(
   onSearchPartOnSite: (SearchSite, String) -> Unit,
   onAddPart: (String, String?, String?) -> Unit,
   onUpdatePart: (Int, String, String?, String?) -> Unit,
-  onUpdatePartNote: (Int, String?) -> Unit,
+  onUpdatePartNote: (Int, String?) -> Unit = { _, _ -> },
   onDeletePart: (Int) -> Unit,
   onClose: () -> Unit,
 ) {
   var partPendingSiteSelection by remember { mutableStateOf<HvacPartAnalysis?>(null) }
   var showAddPartDialog by remember { mutableStateOf(false) }
   var partPendingEdit by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
-  var partPendingNoteEdit by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
   var partPendingDeleteConfirmation by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
   val context = LocalContext.current
 
@@ -4574,7 +4718,18 @@ private fun AiPartAnalysisBottomSheet(
           Text("+ Part", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         }
         TextButton(onClick = onOpenSearchSitesSettings) {
-          Text("⚙ Sites", color = Color(0xFF34D399))
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_settings),
+              contentDescription = "Sites",
+              tint = Color(0xFF34D399),
+              modifier = Modifier.size(16.dp),
+            )
+            Text("Sites", color = Color(0xFF34D399))
+          }
         }
       }
     }
@@ -4595,12 +4750,23 @@ private fun AiPartAnalysisBottomSheet(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-              Text(
-                text = "📦 No HVAC parts recorded yet",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-              )
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                Icon(
+                  painter = painterResource(id = R.drawable.ic_inventory),
+                  contentDescription = null,
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(20.dp),
+                )
+                Text(
+                  text = "No HVAC parts recorded yet",
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                )
+              }
               Text(
                 text = "Add replacement parts, identified components, model numbers, or notes for this photo.",
                 style = MaterialTheme.typography.bodySmall,
@@ -4636,28 +4802,102 @@ private fun AiPartAnalysisBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
               ) {
-                Text(
-                  text = "${index + 1}. ${part.partName}",
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.SemiBold,
-                  color = Color.White,
-                  modifier = Modifier.weight(1f),
-                )
                 Row(
-                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  modifier = Modifier.weight(1f).padding(end = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  Text(
+                    text = "${index + 1}. ${part.partName}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f, fill = false),
+                  )
+                  if (part.source.equals("user", ignoreCase = true) || part.source.equals("manual", ignoreCase = true)) {
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = Color(0xFF1E3A5F),
+                    ) {
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                      ) {
+                        Icon(
+                          painter = painterResource(id = R.drawable.ic_person),
+                          contentDescription = null,
+                          tint = Color(0xFF38BDF8),
+                          modifier = Modifier.size(12.dp),
+                        )
+                        Text(
+                          text = "User Added",
+                          color = Color(0xFF38BDF8),
+                          style = MaterialTheme.typography.labelSmall,
+                          fontWeight = FontWeight.Bold,
+                        )
+                      }
+                    }
+                  } else {
+                    Surface(
+                      shape = RoundedCornerShape(6.dp),
+                      color = Color(0xFF2A1B4E),
+                    ) {
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                      ) {
+                        Icon(
+                          painter = painterResource(id = R.drawable.ic_smart_toy),
+                          contentDescription = null,
+                          tint = Color(0xFFC084FC),
+                          modifier = Modifier.size(12.dp),
+                        )
+                        Text(
+                          text = "AI Detected",
+                          color = Color(0xFFC084FC),
+                          style = MaterialTheme.typography.labelSmall,
+                          fontWeight = FontWeight.Bold,
+                        )
+                      }
+                    }
+                  }
+                }
+
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
                   verticalAlignment = Alignment.CenterVertically,
                 ) {
-                  IconButton(
-                    onClick = { partPendingEdit = index to part },
-                    modifier = Modifier.size(32.dp),
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier =
+                      Modifier.size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x26FFFFFF))
+                        .clickable { partPendingEdit = index to part },
                   ) {
-                    Text("✏", style = MaterialTheme.typography.bodyMedium)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_edit),
+                      contentDescription = "Edit Part",
+                      tint = Color.White,
+                      modifier = Modifier.size(16.dp),
+                    )
                   }
-                  IconButton(
-                    onClick = { partPendingDeleteConfirmation = index to part },
-                    modifier = Modifier.size(32.dp),
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier =
+                      Modifier.size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x26FFFFFF))
+                        .clickable { partPendingDeleteConfirmation = index to part },
                   ) {
-                    Text("🗑", style = MaterialTheme.typography.bodyMedium)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_delete),
+                      contentDescription = "Delete Part",
+                      tint = Color.White,
+                      modifier = Modifier.size(16.dp),
+                    )
                   }
                 }
               }
@@ -4682,7 +4922,12 @@ private fun AiPartAnalysisBottomSheet(
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF34D399),
                     )
-                    Text("📋", style = MaterialTheme.typography.bodySmall)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_copy),
+                      contentDescription = "Copy",
+                      tint = Color(0xFF34D399),
+                      modifier = Modifier.size(14.dp),
+                    )
                   }
                 }
               }
@@ -4705,7 +4950,12 @@ private fun AiPartAnalysisBottomSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                   ) {
-                    Text("📝", style = MaterialTheme.typography.bodySmall)
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_note),
+                      contentDescription = "Note",
+                      tint = Color(0xFF38BDF8),
+                      modifier = Modifier.size(16.dp),
+                    )
                     Text(
                       text = part.notes?.ifBlank { null } ?: "+ Add note (condition, specs, etc.)...",
                       color = if (!part.notes.isNullOrBlank()) Color(0xFFE2E8F0) else Color(0xFF94A3B8),
@@ -4743,7 +4993,18 @@ private fun AiPartAnalysisBottomSheet(
                     ),
                   contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 ) {
-                  Text("🔍 Search Online", style = MaterialTheme.typography.labelMedium)
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_search),
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(16.dp),
+                    )
+                    Text("Search Online", style = MaterialTheme.typography.labelMedium)
+                  }
                 }
 
                 FilledTonalButton(
@@ -4759,7 +5020,18 @@ private fun AiPartAnalysisBottomSheet(
                     ),
                   contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                 ) {
-                  Text("📋 Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_copy),
+                      contentDescription = null,
+                      tint = Color(0xFF38BDF8),
+                      modifier = Modifier.size(16.dp),
+                    )
+                    Text("Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                  }
                 }
               }
             }
@@ -4840,7 +5112,18 @@ private fun AiPartAnalysisBottomSheet(
             onOpenSearchSitesSettings()
           }
         ) {
-          Text("⚙ Manage Search Sites", color = Color(0xFF38BDF8))
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_settings),
+              contentDescription = null,
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(16.dp),
+            )
+            Text("Manage Search Sites", color = Color(0xFF38BDF8))
+          }
         }
       },
       dismissButton = {

@@ -880,6 +880,8 @@ class MainScreenViewModel(
                 )
               }
               _uiState.value.selectedHubCustomer?.id?.let { loadPhotosForCustomer(it) }
+              // Cancel listener immediately - AI only runs once on initial capture and never again
+              aiAnalysisSubscriptionJob?.cancel()
             }
           }
       }
@@ -931,6 +933,7 @@ class MainScreenViewModel(
         modelNumber = cleanModel,
         searchQuery = query,
         notes = cleanNotes,
+        source = "user",
       )
     val updatedParts = _uiState.value.detectedParts + newPart
     persistPartsForActivePhoto(photo.id, updatedParts)
@@ -950,6 +953,7 @@ class MainScreenViewModel(
         modelNumber = cleanModel,
         searchQuery = query,
         notes = cleanNotes,
+        source = currentList[index].source,
       )
     persistPartsForActivePhoto(photo.id, currentList)
   }

@@ -76,6 +76,7 @@ data class HvacPartAnalysis(
   @SerialName("model_number") val modelNumber: String? = null,
   @SerialName("search_query") val searchQuery: String = "",
   val notes: String? = null,
+  val source: String = "ai",
 )
 
 @Serializable
