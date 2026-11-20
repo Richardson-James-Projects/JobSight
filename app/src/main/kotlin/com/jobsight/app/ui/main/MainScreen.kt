@@ -4802,18 +4802,20 @@ private fun AiPartAnalysisBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
               ) {
+                Text(
+                  text = part.partName,
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                  modifier = Modifier.weight(1f).padding(end = 8.dp),
+                  maxLines = 2,
+                  overflow = TextOverflow.Ellipsis,
+                )
+
                 Row(
-                  modifier = Modifier.weight(1f).padding(end = 6.dp),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                  Text(
-                    text = "${index + 1}. ${part.partName}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    modifier = Modifier.weight(1f, fill = false),
-                  )
                   if (part.source.equals("user", ignoreCase = true) || part.source.equals("manual", ignoreCase = true)) {
                     Surface(
                       shape = RoundedCornerShape(6.dp),
@@ -4831,7 +4833,7 @@ private fun AiPartAnalysisBottomSheet(
                           modifier = Modifier.size(12.dp),
                         )
                         Text(
-                          text = "User Added",
+                          text = "User",
                           color = Color(0xFF38BDF8),
                           style = MaterialTheme.typography.labelSmall,
                           fontWeight = FontWeight.Bold,
@@ -4855,7 +4857,7 @@ private fun AiPartAnalysisBottomSheet(
                           modifier = Modifier.size(12.dp),
                         )
                         Text(
-                          text = "AI Detected",
+                          text = "AI",
                           color = Color(0xFFC084FC),
                           style = MaterialTheme.typography.labelSmall,
                           fontWeight = FontWeight.Bold,
@@ -4863,12 +4865,7 @@ private fun AiPartAnalysisBottomSheet(
                       }
                     }
                   }
-                }
 
-                Row(
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                ) {
                   Box(
                     contentAlignment = Alignment.Center,
                     modifier =
@@ -4906,47 +4903,25 @@ private fun AiPartAnalysisBottomSheet(
                 Surface(
                   shape = RoundedCornerShape(6.dp),
                   color = Color(0xFF0F291E),
-                  modifier =
-                    Modifier.clickable {
-                      copyTextToClipboard(context, "Model Number", part.modelNumber)
-                    },
                 ) {
-                  Row(
+                  Text(
+                    text = "Model / Part #: ${part.modelNumber}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF34D399),
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  ) {
-                    Text(
-                      text = "Model / Part #: ${part.modelNumber}",
-                      style = MaterialTheme.typography.bodyMedium,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF34D399),
-                    )
-                    Icon(
-                      painter = painterResource(id = R.drawable.ic_copy),
-                      contentDescription = "Copy",
-                      tint = Color(0xFF34D399),
-                      modifier = Modifier.size(14.dp),
-                    )
-                  }
+                  )
                 }
               }
 
-              // Part Notes row
-              Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (!part.notes.isNullOrBlank()) Color(0xFF0E2243) else Color(0x330E2243),
-                modifier =
-                  Modifier.fillMaxWidth()
-                    .clickable { partPendingNoteEdit = index to part },
-              ) {
-                Row(
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.SpaceBetween,
+              if (!part.notes.isNullOrBlank()) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color(0xFF0E2243),
+                  modifier = Modifier.fillMaxWidth(),
                 ) {
                   Row(
-                    modifier = Modifier.weight(1f).padding(end = 6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                   ) {
@@ -4957,22 +4932,13 @@ private fun AiPartAnalysisBottomSheet(
                       modifier = Modifier.size(16.dp),
                     )
                     Text(
-                      text = part.notes?.ifBlank { null } ?: "+ Add note (condition, specs, etc.)...",
-                      color = if (!part.notes.isNullOrBlank()) Color(0xFFE2E8F0) else Color(0xFF94A3B8),
+                      text = part.notes.orEmpty(),
+                      color = Color(0xFFE2E8F0),
                       style = MaterialTheme.typography.bodySmall,
-                      fontStyle =
-                        if (part.notes.isNullOrBlank()) androidx.compose.ui.text.font.FontStyle.Italic
-                        else androidx.compose.ui.text.font.FontStyle.Normal,
-                      maxLines = 2,
+                      maxLines = 3,
                       overflow = TextOverflow.Ellipsis,
                     )
                   }
-                  Text(
-                    text = if (!part.notes.isNullOrBlank()) "Edit Note" else "+ Note",
-                    color = Color(0xFF38BDF8),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                  )
                 }
               }
 
@@ -5158,18 +5124,6 @@ private fun AiPartAnalysisBottomSheet(
     )
   }
 
-  // Edit Part Note Dialog
-  partPendingNoteEdit?.let { (index, part) ->
-    EditPartNoteDialog(
-      partName = part.partName,
-      initialNotes = part.notes.orEmpty(),
-      onConfirm = { notes ->
-        onUpdatePartNote(index, notes)
-        partPendingNoteEdit = null
-      },
-      onDismiss = { partPendingNoteEdit = null },
-    )
-  }
 
   // Delete Part Confirmation Dialog
   partPendingDeleteConfirmation?.let { (index, part) ->
@@ -5280,58 +5234,6 @@ private fun AddEditHvacPartDialog(
           ),
       ) {
         Text("Save", fontWeight = FontWeight.Bold)
-      }
-    },
-    dismissButton = {
-      OutlinedButton(onClick = onDismiss) {
-        Text("Cancel", color = Color(0xFF94A3B8))
-      }
-    },
-  )
-}
-
-@Composable
-private fun EditPartNoteDialog(
-  partName: String,
-  initialNotes: String,
-  onConfirm: (String?) -> Unit,
-  onDismiss: () -> Unit,
-) {
-  var noteText by remember { mutableStateOf(initialNotes) }
-
-  AlertDialog(
-    onDismissRequest = onDismiss,
-    containerColor = Color(0xFF132D57),
-    titleContentColor = Color.White,
-    textContentColor = Color.White,
-    title = {
-      Text("Part Note: $partName", fontWeight = FontWeight.Bold)
-    },
-    text = {
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-          value = noteText,
-          onValueChange = { noteText = it },
-          label = { Text("Note / Condition / Specs") },
-          placeholder = { Text("e.g. Tested 38 uF, top bulging, replaced") },
-          minLines = 3,
-          maxLines = 6,
-          modifier = Modifier.fillMaxWidth(),
-        )
-      }
-    },
-    confirmButton = {
-      Button(
-        onClick = {
-          onConfirm(noteText.trim().ifBlank { null })
-        },
-        colors =
-          ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF0F93E8),
-            contentColor = Color.White,
-          ),
-      ) {
-        Text("Save Note", fontWeight = FontWeight.Bold)
       }
     },
     dismissButton = {

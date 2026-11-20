@@ -953,7 +953,7 @@ class MainScreenViewModel(
         modelNumber = cleanModel,
         searchQuery = query,
         notes = cleanNotes,
-        source = currentList[index].source,
+        source = "user",
       )
     persistPartsForActivePhoto(photo.id, currentList)
   }
@@ -963,7 +963,7 @@ class MainScreenViewModel(
     val currentList = _uiState.value.detectedParts.toMutableList()
     if (index !in currentList.indices) return
     val cleanNotes = notes?.trim()?.ifBlank { null }
-    currentList[index] = currentList[index].copy(notes = cleanNotes)
+    currentList[index] = currentList[index].copy(notes = cleanNotes, source = "user")
     persistPartsForActivePhoto(photo.id, currentList)
   }
 
