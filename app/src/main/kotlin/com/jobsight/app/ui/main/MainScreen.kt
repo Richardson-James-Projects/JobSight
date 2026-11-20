@@ -1564,7 +1564,18 @@ private fun CustomerTagListDialog(
     dismissButton = {
       if (activeStepCustomer != null) {
         TextButton(onClick = { selectedCustomerForLocationStep = null }) {
-          Text("← Back to Customers", color = Color(0xFF38BDF8))
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_arrow_back),
+              contentDescription = "Back",
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(16.dp),
+            )
+            Text("Back to Customers", color = Color(0xFF38BDF8))
+          }
         }
       } else {
         TextButton(onClick = onDismiss) {
@@ -1613,10 +1624,16 @@ private fun CustomerPhotosBottomSheet(
       OutlinedButton(
         onClick = onClose,
         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(36.dp),
+        shape = CircleShape,
       ) {
-        Text("← Camera", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Icon(
+          painter = painterResource(id = R.drawable.ic_arrow_back),
+          contentDescription = "Back to Camera",
+          tint = Color(0xFF38BDF8),
+          modifier = Modifier.size(20.dp),
+        )
       }
       Text(
         text = "Customer Photos",
@@ -1960,10 +1977,16 @@ private fun AppSettingsBottomSheet(
       OutlinedButton(
         onClick = onClose,
         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(36.dp),
+        shape = CircleShape,
       ) {
-        Text("← Camera", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Icon(
+          painter = painterResource(id = R.drawable.ic_arrow_back),
+          contentDescription = "Back to Camera",
+          tint = Color(0xFF38BDF8),
+          modifier = Modifier.size(20.dp),
+        )
       }
       Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -3406,10 +3429,16 @@ private fun FullScreenPhotoViewerDialog(
             OutlinedButton(
               onClick = onDismiss,
               colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-              modifier = Modifier.height(34.dp),
+              contentPadding = PaddingValues(0.dp),
+              modifier = Modifier.size(36.dp),
+              shape = CircleShape,
             ) {
-              Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+              Icon(
+                painter = painterResource(id = R.drawable.ic_arrow_back),
+                contentDescription = "Back",
+                tint = Color(0xFF38BDF8),
+                modifier = Modifier.size(20.dp),
+              )
             }
 
             Column(
@@ -4149,10 +4178,16 @@ private fun InteractiveMapPickerDialog(
           OutlinedButton(
             onClick = onDismiss,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            modifier = Modifier.height(34.dp),
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.size(36.dp),
+            shape = CircleShape,
           ) {
-            Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Icon(
+              painter = painterResource(id = R.drawable.ic_arrow_back),
+              contentDescription = "Back",
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(20.dp),
+            )
           }
           Text(
             text = "Tap Rooftop or Search Address",
@@ -4678,10 +4713,16 @@ private fun AiPartAnalysisBottomSheet(
       OutlinedButton(
         onClick = onClose,
         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(36.dp),
+        shape = CircleShape,
       ) {
-        Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Icon(
+          painter = painterResource(id = R.drawable.ic_arrow_back),
+          contentDescription = "Back",
+          tint = Color(0xFF38BDF8),
+          modifier = Modifier.size(20.dp),
+        )
       }
       Column(
         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
