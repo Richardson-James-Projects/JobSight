@@ -216,6 +216,7 @@ internal fun FieldCameraContent(
       .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
       .build()
   }
+  var showDirectAddCustomerDialog by remember { mutableStateOf(false) }
 
   Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0F14))) {
     // 1. Full-screen distortion-free CameraX PreviewView
@@ -245,6 +246,7 @@ internal fun FieldCameraContent(
         uiState = uiState,
         hasLocationPermission = hasLocationPermission,
         onOpenCustomerPicker = onOpenCustomerPicker,
+        onAddCustomerClick = { showDirectAddCustomerDialog = true },
         onOpenCustomerHub = { onOpenCustomerHub(uiState.activeCustomer?.id) },
         onResetToAutoGps = { onSelectCustomerManually(null, null) },
       )
@@ -358,12 +360,24 @@ internal fun FieldCameraContent(
             activeCustomer != null ->
               "Auto-tagging: ${activeCustomer.name}$locSuffix"
             else ->
-              "Untagged Capture • Tap 'Switch Customer' above to tag manually"
+              "Untagged Capture • Tap 'Select Customer' above to tag manually"
           },
         color = Color.White.copy(alpha = 0.9f),
         style = MaterialTheme.typography.labelMedium,
       )
     }
+  }
+
+  if (showDirectAddCustomerDialog) {
+    AddCustomerDialog(
+      hasCurrentGps = uiState.currentLocation != null,
+      isSaving = uiState.isSavingCustomerOrLocation,
+      onConfirm = { name, locLabel, useGps, address ->
+        showDirectAddCustomerDialog = false
+        onCreateCustomer(name, locLabel, useGps, address)
+      },
+      onDismiss = { showDirectAddCustomerDialog = false },
+    )
   }
 
   // 4. Customer & Location Switcher Modal (Auto-Detect vs Manual Customer + Location Override)
@@ -436,6 +450,7 @@ private fun GeofenceHeaderBadge(
   uiState: FieldCameraUiState,
   hasLocationPermission: Boolean,
   onOpenCustomerPicker: () -> Unit,
+  onAddCustomerClick: () -> Unit,
   onOpenCustomerHub: () -> Unit,
   onResetToAutoGps: () -> Unit,
 ) {
@@ -481,9 +496,7 @@ private fun GeofenceHeaderBadge(
                 autoDetected != null -> "Detected: ${autoDetected.name}"
                 !hasLocationPermission -> "Location Permission Required"
                 uiState.currentLocation == null -> "Acquiring GPS Location..."
-                closest != null ->
-                  "Outside Geofence (${closest.distanceMeters.roundToInt()}m to ${closest.customer.name})"
-                else -> "No Customers in Geofence (< 100m)"
+                else -> "No Customer for Location"
               },
             color = Color.White,
             style = MaterialTheme.typography.titleMedium,
@@ -533,7 +546,7 @@ private fun GeofenceHeaderBadge(
         }
       }
 
-      // Two full-width action buttons that never truncate
+      // Row 1: Select Customer | Add Customer
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -549,27 +562,44 @@ private fun GeofenceHeaderBadge(
           modifier = Modifier.weight(1f).height(36.dp),
         ) {
           Text(
-            text = "Switch Customer / Site",
+            text = "Select Customer",
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
           )
         }
 
         Button(
-          onClick = onOpenCustomerHub,
+          onClick = onAddCustomerClick,
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = Color(0xFF0284C7),
+              containerColor = Color(0xFF10B981),
               contentColor = Color.White,
             ),
           modifier = Modifier.weight(1f).height(36.dp),
         ) {
           Text(
-            text = "Customers & Photos",
+            text = "Add Customer",
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
           )
         }
+      }
+
+      // Row 2: Customers & Photos
+      Button(
+        onClick = onOpenCustomerHub,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0284C7),
+            contentColor = Color.White,
+          ),
+        modifier = Modifier.fillMaxWidth().height(36.dp),
+      ) {
+        Text(
+          text = "Customers & Photos",
+          style = MaterialTheme.typography.labelSmall,
+          maxLines = 1,
+        )
       }
     }
   }
