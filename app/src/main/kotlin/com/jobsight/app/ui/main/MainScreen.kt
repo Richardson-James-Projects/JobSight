@@ -298,27 +298,12 @@ internal fun FieldCameraContent(
             }
 
             if (uiState.isAwaitingAiAnalysis) {
-              Spacer(modifier = Modifier.height(6.dp))
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Text(
-                  text = "Listening for Supabase ai_analysis_json update...",
-                  color = Color(0xFF9CA3AF),
-                  style = MaterialTheme.typography.labelSmall,
-                )
-                FilledTonalButton(
-                  onClick = { onTriggerDemoAi(null) },
-                  modifier = Modifier.height(30.dp),
-                ) {
-                  Text(
-                    text = "Simulate AI Result",
-                    style = MaterialTheme.typography.labelSmall,
-                  )
-                }
-              }
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(
+                text = "Waiting for AI Vision analysis from cloud...",
+                color = Color(0xFF9CA3AF),
+                style = MaterialTheme.typography.labelSmall,
+              )
             }
           }
         }
@@ -539,7 +524,9 @@ private fun GeofenceHeaderBadge(
                 val matchedLoc = uiState.autoDetectedLocation
                 val locLabel = matchedLoc?.label ?: "Site"
                 val locAddr = matchedLoc?.address ?: autoDetected.address
-                "${closest?.distanceMeters?.roundToInt() ?: 0}m away • $locLabel ($locAddr)"
+                val distLabel =
+                  LocationTracker.formatDistanceImperial(closest?.distanceMeters ?: 0f)
+                "$distLabel away • $locLabel ($locAddr)"
               }
               uiState.currentLocation != null ->
                 "GPS: ${"%.5f".format(uiState.currentLocation.latitude)}, ${"%.5f".format(uiState.currentLocation.longitude)}"
@@ -704,11 +691,12 @@ private fun CustomerTagListDialog(
         // 1. Auto-Detect via GPS option
         item {
           val isAutoMode = uiState.manualCustomerOverrideId == null
+          val radiusLabel = LocationTracker.formatDistanceImperial(uiState.geofenceRadiusMeters)
           val autoDetectedName =
             uiState.autoDetectedCustomer?.let { cust ->
               val locName = uiState.autoDetectedLocation?.label?.let { " • $it" }.orEmpty()
               "${cust.name}$locName"
-            } ?: "No customer within ${uiState.geofenceRadiusMeters.toInt()}m"
+            } ?: "No customer within $radiusLabel"
 
           Surface(
             shape = RoundedCornerShape(10.dp),
@@ -818,7 +806,7 @@ private fun CustomerTagListDialog(
                         buildString {
                           append("${loc.label} • ${loc.address}")
                           if (distMeters != null) {
-                            append(" (${distMeters.roundToInt()}m)")
+                            append(" (${LocationTracker.formatDistanceImperial(distMeters)})")
                           }
                         },
                       style = MaterialTheme.typography.labelSmall,
@@ -1360,14 +1348,22 @@ private fun AppSettingsBottomSheet(
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               modifier = Modifier.fillMaxWidth(),
             ) {
-              listOf(50f, 100f, 250f, 500f).forEach { radius ->
-                val isSelected = uiState.geofenceRadiusMeters == radius
+              val presets =
+                listOf(
+                  45.72f to "150 ft",
+                  100f to "325 ft",
+                  152.4f to "500 ft",
+                  304.8f to "1000 ft",
+                  804.67f to "0.5 mi",
+                )
+              presets.forEach { (radiusMeters, label) ->
+                val isSelected = kotlin.math.abs(uiState.geofenceRadiusMeters - radiusMeters) < 2f
                 FilterChip(
                   selected = isSelected,
-                  onClick = { onSetGeofenceRadius(radius) },
+                  onClick = { onSetGeofenceRadius(radiusMeters) },
                   label = {
                     Text(
-                      text = "${radius.toInt()}m",
+                      text = label,
                       color = if (isSelected) Color.White else Color(0xFFCBD5E1),
                     )
                   },
@@ -1608,10 +1604,16 @@ private fun CustomerPhotosSection(
                 Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
               }
             } else {
-              FilledTonalButton(
-                onClick = { onTriggerDemoAi(photo.id) },
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF334155),
               ) {
-                Text("Simulate AI ID", style = MaterialTheme.typography.labelSmall)
+                Text(
+                  text = "Pending AI ID",
+                  color = Color(0xFFCBD5E1),
+                  style = MaterialTheme.typography.labelSmall,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
               }
             }
           }

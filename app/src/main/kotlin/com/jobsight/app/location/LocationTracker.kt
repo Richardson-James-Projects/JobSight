@@ -114,5 +114,22 @@ class LocationTracker(context: Context) {
         }
       return deviceLocation.distanceTo(target)
     }
+
+    private const val FEET_PER_METER = 3.28084f
+    private const val FEET_PER_MILE = 5280f
+
+    fun formatDistanceImperial(distanceMeters: Float): String {
+      val feet = distanceMeters * FEET_PER_METER
+      return if (feet < 1000f) {
+        "${feet.toInt()} ft"
+      } else {
+        val miles = feet / FEET_PER_MILE
+        if (miles < 10f) {
+          "%.1f mi".format(miles)
+        } else {
+          "${miles.toInt()} mi"
+        }
+      }
+    }
   }
 }

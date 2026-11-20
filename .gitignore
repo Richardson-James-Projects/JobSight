@@ -1,6 +1,8 @@
 *.iml
 .gradle
+.kotlin/
 /local.properties
+local.properties
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -12,4 +14,16 @@
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
+# Compiled Android binaries
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Google Play Store signing keys & secrets (never commit these!)
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*

@@ -140,10 +140,11 @@ class MainScreenViewModel(
   }
 
   fun setGeofenceRadiusMeters(radiusMeters: Float) {
+    val label = LocationTracker.formatDistanceImperial(radiusMeters)
     _uiState.update {
       it.copy(
         geofenceRadiusMeters = radiusMeters,
-        statusBannerMessage = "Auto-detect GPS radius set to ${radiusMeters.toInt()}m",
+        statusBannerMessage = "Auto-detect GPS radius set to $label",
       )
     }
   }
