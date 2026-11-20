@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,6 +91,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.jobsight.app.R
 import com.jobsight.app.data.AnalysisJsonParser
 import com.jobsight.app.data.CapturedPhotoRow
 import com.jobsight.app.data.Customer
@@ -99,6 +101,7 @@ import com.jobsight.app.data.SearchSite
 import com.jobsight.app.location.LocationTracker
 import java.io.File
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 @Composable
 fun MainScreen(
@@ -135,6 +138,12 @@ fun MainScreen(
           hasLocationPermission
     }
 
+  var showLaunchSplash by remember { mutableStateOf(true) }
+  LaunchedEffect(Unit) {
+    delay(1500L)
+    showLaunchSplash = false
+  }
+
   LaunchedEffect(Unit) {
     if (!hasCameraPermission || !hasLocationPermission) {
       permissionLauncher.launch(
@@ -157,49 +166,85 @@ fun MainScreen(
     }
   }
 
-  FieldCameraContent(
-    uiState = uiState,
-    hasCameraPermission = hasCameraPermission,
-    hasLocationPermission = hasLocationPermission,
-    onRequestPermissions = {
-      permissionLauncher.launch(
-        arrayOf(
-          Manifest.permission.CAMERA,
-          Manifest.permission.ACCESS_FINE_LOCATION,
-          Manifest.permission.ACCESS_COARSE_LOCATION,
+  Box(modifier = modifier.fillMaxSize().background(Color(0xFF0E2243))) {
+    FieldCameraContent(
+      uiState = uiState,
+      hasCameraPermission = hasCameraPermission,
+      hasLocationPermission = hasLocationPermission,
+      onRequestPermissions = {
+        permissionLauncher.launch(
+          arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+          )
         )
+      },
+      onPhotoCapturedToCache = viewModel::onPhotoCapturedToCache,
+      onOpenCustomerPicker = viewModel::openCustomerPicker,
+      onCloseCustomerPicker = viewModel::closeCustomerPicker,
+      onSelectCustomerManually = viewModel::selectCustomerManually,
+      onOpenCustomerHub = viewModel::openCustomerHub,
+      onCloseCustomerHub = viewModel::closeCustomerHub,
+      onSelectHubCustomer = viewModel::selectHubCustomer,
+      onCreateCustomer = viewModel::createNewCustomer,
+      onDeleteCustomer = viewModel::deleteCustomer,
+      onAddLocationToCustomer = { customerId, label, useGps, address ->
+        viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = false)
+      },
+      onAddAndSelectLocationForCustomer = { customerId, label, useGps, address ->
+        viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = true)
+      },
+      onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
+      onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
+      onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
+      onOpenSettingsSheet = viewModel::openSettingsSheet,
+      onCloseSettingsSheet = viewModel::closeSettingsSheet,
+      onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
+      onAddSearchSite = viewModel::addSearchSite,
+      onDeleteSearchSite = viewModel::deleteSearchSite,
+      onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
+      onShowPartsForPhoto = viewModel::showPartsForPhoto,
+      onDismissBottomSheet = viewModel::dismissBottomSheet,
+      onReopenBottomSheet = viewModel::reopenBottomSheet,
+      onDismissError = viewModel::clearError,
+      modifier = Modifier.fillMaxSize(),
+    )
+
+    AnimatedVisibility(
+      visible = showLaunchSplash,
+      modifier = Modifier.fillMaxSize(),
+    ) {
+      JobSightLaunchSplashScreen()
+    }
+  }
+}
+
+@Composable
+private fun JobSightLaunchSplashScreen() {
+  Box(
+    modifier = Modifier.fillMaxSize().background(Color(0xFF0E2243)),
+    contentAlignment = Alignment.Center,
+  ) {
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(20.dp),
+      modifier = Modifier.padding(32.dp),
+    ) {
+      Image(
+        painter = painterResource(id = R.drawable.jobsight_logo_full),
+        contentDescription = "JobSight Logo",
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.fillMaxWidth(0.82f).height(240.dp),
       )
-    },
-    onPhotoCapturedToCache = viewModel::onPhotoCapturedToCache,
-    onOpenCustomerPicker = viewModel::openCustomerPicker,
-    onCloseCustomerPicker = viewModel::closeCustomerPicker,
-    onSelectCustomerManually = viewModel::selectCustomerManually,
-    onOpenCustomerHub = viewModel::openCustomerHub,
-    onCloseCustomerHub = viewModel::closeCustomerHub,
-    onSelectHubCustomer = viewModel::selectHubCustomer,
-    onCreateCustomer = viewModel::createNewCustomer,
-    onDeleteCustomer = viewModel::deleteCustomer,
-    onAddLocationToCustomer = { customerId, label, useGps, address ->
-      viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = false)
-    },
-    onAddAndSelectLocationForCustomer = { customerId, label, useGps, address ->
-      viewModel.addLocationToCustomer(customerId, label, useGps, address, selectForCameraTag = true)
-    },
-    onDeleteLocationFromCustomer = viewModel::deleteLocationFromCustomer,
-    onOpenSearchSitesSettings = viewModel::openSearchSitesSettings,
-    onCloseSearchSitesSettings = viewModel::closeSearchSitesSettings,
-    onOpenSettingsSheet = viewModel::openSettingsSheet,
-    onCloseSettingsSheet = viewModel::closeSettingsSheet,
-    onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
-    onAddSearchSite = viewModel::addSearchSite,
-    onDeleteSearchSite = viewModel::deleteSearchSite,
-    onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
-    onShowPartsForPhoto = viewModel::showPartsForPhoto,
-    onDismissBottomSheet = viewModel::dismissBottomSheet,
-    onReopenBottomSheet = viewModel::reopenBottomSheet,
-    onDismissError = viewModel::clearError,
-    modifier = modifier,
-  )
+      CircularProgressIndicator(
+        modifier = Modifier.size(32.dp),
+        color = Color(0xFFEE4D38),
+        trackColor = Color(0xFF0F93E8),
+        strokeWidth = 3.dp,
+      )
+    }
+  }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -427,7 +472,7 @@ internal fun FieldCameraContent(
     BackHandler(onBack = onCloseCustomerHub)
     Surface(
       modifier = Modifier.fillMaxSize(),
-      color = Color(0xFF0F172A),
+      color = Color(0xFF0E2243),
       contentColor = Color.White,
     ) {
       CustomerPhotosBottomSheet(
@@ -449,7 +494,7 @@ internal fun FieldCameraContent(
     BackHandler(onBack = onCloseSettingsSheet)
     Surface(
       modifier = Modifier.fillMaxSize(),
-      color = Color(0xFF0F172A),
+      color = Color(0xFF0E2243),
       contentColor = Color.White,
     ) {
       AppSettingsBottomSheet(
@@ -511,15 +556,15 @@ private fun GeofenceHeaderBadge(
 
   val badgeBackground =
     when {
-      manualCustomer != null -> Color(0xD91E3A8A)
-      autoDetected != null -> Color(0xD9065F46)
-      else -> Color(0xCC1F2937)
+      manualCustomer != null -> Color(0xE6132D57)
+      autoDetected != null -> Color(0xE60E2243)
+      else -> Color(0xD90E2243)
     }
   val borderColor =
     when {
-      manualCustomer != null -> Color(0xFF60A5FA)
-      autoDetected != null -> Color(0xFF34D399)
-      else -> Color(0xFF4B5563)
+      manualCustomer != null -> Color(0xFFEE4D38)
+      autoDetected != null -> Color(0xFF0F93E8)
+      else -> Color(0xFF284B80)
     }
 
   Surface(
@@ -603,7 +648,7 @@ private fun GeofenceHeaderBadge(
             onClick = onOpenSettingsClick,
             colors =
               ButtonDefaults.filledTonalButtonColors(
-                containerColor = Color(0xFF1E293B),
+                containerColor = Color(0xFF132D57),
                 contentColor = Color.White,
               ),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
@@ -624,7 +669,7 @@ private fun GeofenceHeaderBadge(
           onClick = onOpenCustomerPicker,
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = Color(0xFF1E293B),
+              containerColor = Color(0xFF132D57),
               contentColor = Color.White,
             ),
           modifier = Modifier.weight(1f).height(38.dp),
@@ -640,7 +685,7 @@ private fun GeofenceHeaderBadge(
           onClick = onOpenPhotosClick,
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = Color(0xFF0284C7),
+              containerColor = Color(0xFF0F93E8),
               contentColor = Color.White,
             ),
           modifier = Modifier.weight(1f).height(38.dp),
@@ -683,7 +728,7 @@ private fun CustomerTagListDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = Color(0xFF1E293B),
+    containerColor = Color(0xFF132D57),
     titleContentColor = Color.White,
     textContentColor = Color.White,
     title = {
@@ -728,10 +773,10 @@ private fun CustomerTagListDialog(
           item {
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = Color(0xFF064E3B),
+              color = Color(0xFF1A3A6E),
               modifier =
                 Modifier.fillMaxWidth()
-                  .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
+                  .border(1.dp, Color(0xFFEE4D38), RoundedCornerShape(10.dp))
                   .clickable { showNewCustomerDialog = true },
             ) {
               Row(
@@ -781,7 +826,7 @@ private fun CustomerTagListDialog(
 
               Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
+                color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0E2243),
                 modifier =
                   Modifier.fillMaxWidth()
                     .clickable { onSelectCustomerAndLocation(null, null) },
@@ -819,7 +864,7 @@ private fun CustomerTagListDialog(
             val isCurrentCustomer = uiState.manualCustomerOverrideId == customer.id
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = if (isCurrentCustomer) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              color = if (isCurrentCustomer) Color(0xFF1E3A8A) else Color(0xFF0E2243),
               modifier =
                 Modifier.fillMaxWidth()
                   .clickable { selectedCustomerForLocationStep = customer },
@@ -866,10 +911,10 @@ private fun CustomerTagListDialog(
           item {
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = Color(0xFF064E3B),
+              color = Color(0xFF1A3A6E),
               modifier =
                 Modifier.fillMaxWidth()
-                  .border(1.dp, Color(0xFF10B981), RoundedCornerShape(10.dp))
+                  .border(1.dp, Color(0xFFEE4D38), RoundedCornerShape(10.dp))
                   .clickable { showNewLocationForSelectedCustomer = true },
             ) {
               Row(
@@ -903,7 +948,7 @@ private fun CustomerTagListDialog(
             item {
               Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF0F172A),
+                color = Color(0xFF0E2243),
                 modifier =
                   Modifier.fillMaxWidth()
                     .clickable {
@@ -948,7 +993,7 @@ private fun CustomerTagListDialog(
 
               Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+                color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0E2243),
                 modifier =
                   Modifier.fillMaxWidth()
                     .clickable {
@@ -1085,7 +1130,7 @@ private fun CustomerPhotosBottomSheet(
         onClick = onOpenSettingsClick,
         colors =
           ButtonDefaults.filledTonalButtonColors(
-            containerColor = Color(0xFF1E293B),
+            containerColor = Color(0xFF132D57),
             contentColor = Color.White,
           ),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
@@ -1098,7 +1143,7 @@ private fun CustomerPhotosBottomSheet(
     // Clean Button to pull up the Customer List Popup (just like Search Sites!)
     Surface(
       shape = RoundedCornerShape(12.dp),
-      color = Color(0xFF1E293B),
+      color = Color(0xFF132D57),
       modifier =
         Modifier.fillMaxWidth()
           .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(12.dp))
@@ -1148,7 +1193,7 @@ private fun CustomerPhotosBottomSheet(
   if (showPhotoCustomerPicker) {
     AlertDialog(
       onDismissRequest = { showPhotoCustomerPicker = false },
-      containerColor = Color(0xFF1E293B),
+      containerColor = Color(0xFF132D57),
       titleContentColor = Color.White,
       textContentColor = Color.White,
       title = { Text("Choose Customer to View Photos", fontWeight = FontWeight.Bold) },
@@ -1161,7 +1206,7 @@ private fun CustomerPhotosBottomSheet(
             val isSelected = selectedCustomer?.id == customer.id
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
+              color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0E2243),
               modifier =
                 Modifier.fillMaxWidth()
                   .clickable {
@@ -1267,7 +1312,7 @@ private fun AppSettingsBottomSheet(
 
     SecondaryTabRow(
       selectedTabIndex = selectedTab,
-      containerColor = Color(0xFF1E293B),
+      containerColor = Color(0xFF132D57),
       contentColor = Color.White,
     ) {
       Tab(
@@ -1304,7 +1349,7 @@ private fun AppSettingsBottomSheet(
             onClick = { showNewCustomerDialog = true },
             colors =
               ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF10B981),
+                containerColor = Color(0xFFEE4D38),
                 contentColor = Color.White,
               ),
           ) {
@@ -1318,7 +1363,7 @@ private fun AppSettingsBottomSheet(
         ) {
           items(uiState.customers, key = { it.id }) { customer ->
             Card(
-              colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+              colors = CardDefaults.cardColors(containerColor = Color(0xFF132D57)),
               shape = RoundedCornerShape(12.dp),
               modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1349,7 +1394,7 @@ private fun AppSettingsBottomSheet(
                       onClick = { customerForNewLocation = customer },
                       colors =
                         ButtonDefaults.filledTonalButtonColors(
-                          containerColor = Color(0xFF0284C7),
+                          containerColor = Color(0xFF0F93E8),
                           contentColor = Color.White,
                         ),
                       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
@@ -1372,7 +1417,7 @@ private fun AppSettingsBottomSheet(
                 customer.locations.forEach { loc ->
                   Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF0F172A),
+                    color = Color(0xFF0E2243),
                     modifier = Modifier.fillMaxWidth(),
                   ) {
                     Row(
@@ -1417,7 +1462,7 @@ private fun AppSettingsBottomSheet(
         // Tab 1: Search Sites Settings
         Surface(
           shape = RoundedCornerShape(12.dp),
-          color = Color(0xFF1E293B),
+          color = Color(0xFF132D57),
           modifier = Modifier.fillMaxWidth(),
         ) {
           Column(
@@ -1454,7 +1499,7 @@ private fun AppSettingsBottomSheet(
               },
               colors =
                 ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF10B981),
+                  containerColor = Color(0xFFEE4D38),
                   contentColor = Color.White,
                 ),
               modifier = Modifier.fillMaxWidth(),
@@ -1471,7 +1516,7 @@ private fun AppSettingsBottomSheet(
           items(uiState.searchSites, key = { it.id }) { site ->
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = Color(0xFF1E293B),
+              color = Color(0xFF132D57),
               modifier = Modifier.fillMaxWidth(),
             ) {
               Row(
@@ -1510,7 +1555,7 @@ private fun AppSettingsBottomSheet(
         // Tab 2: GPS & App Settings (Geofence Radius, etc.)
         Surface(
           shape = RoundedCornerShape(12.dp),
-          color = Color(0xFF1E293B),
+          color = Color(0xFF132D57),
           modifier = Modifier.fillMaxWidth(),
         ) {
           Column(
@@ -1554,8 +1599,8 @@ private fun AppSettingsBottomSheet(
                   },
                   colors =
                     FilterChipDefaults.filterChipColors(
-                      selectedContainerColor = Color(0xFF0284C7),
-                      containerColor = Color(0xFF0F172A),
+                      selectedContainerColor = Color(0xFF0F93E8),
+                      containerColor = Color(0xFF0E2243),
                     ),
                 )
               }
@@ -1699,7 +1744,7 @@ private fun CustomerPhotosSection(
         }
 
       Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF132D57)),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
@@ -1733,7 +1778,7 @@ private fun CustomerPhotosSection(
 
           Surface(
             shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF0F172A),
+            color = Color(0xFF0E2243),
             modifier = Modifier.fillMaxWidth(),
           ) {
             Column(
@@ -2314,7 +2359,7 @@ private fun AiPartAnalysisBottomSheet(
               modifier = Modifier.fillMaxWidth(),
               colors =
                 ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF0284C7),
+                  containerColor = Color(0xFF0F93E8),
                   contentColor = Color.White,
                 ),
             ) {
@@ -2330,7 +2375,7 @@ private fun AiPartAnalysisBottomSheet(
   partPendingSiteSelection?.let { selectedPart ->
     AlertDialog(
       onDismissRequest = { partPendingSiteSelection = null },
-      containerColor = Color(0xFF1E293B),
+      containerColor = Color(0xFF132D57),
       titleContentColor = Color.White,
       textContentColor = Color.White,
       title = {
@@ -2351,7 +2396,7 @@ private fun AiPartAnalysisBottomSheet(
           items(searchSites, key = { it.id }) { site ->
             Surface(
               shape = RoundedCornerShape(10.dp),
-              color = Color(0xFF0F172A),
+              color = Color(0xFF0E2243),
               modifier =
                 Modifier.fillMaxWidth()
                   .clickable {
