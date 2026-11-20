@@ -254,6 +254,10 @@ fun MainScreen(
         onSignOutCompany = viewModel::signOutCompany,
         onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
         onShowPartsForPhoto = viewModel::showPartsForPhoto,
+        onAddPart = viewModel::addPartToActivePhoto,
+        onUpdatePart = viewModel::updatePartInActivePhoto,
+        onUpdatePartNote = viewModel::updatePartNoteInActivePhoto,
+        onDeletePart = viewModel::deletePartFromActivePhoto,
         onDismissBottomSheet = viewModel::dismissBottomSheet,
         onReopenBottomSheet = viewModel::reopenBottomSheet,
         onClearStatusBanner = viewModel::clearStatusBanner,
@@ -518,6 +522,10 @@ internal fun FieldCameraContent(
   onSignOutCompany: () -> Unit = {},
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
+  onAddPart: (String, String?, String?) -> Unit = { _, _, _ -> },
+  onUpdatePart: (Int, String, String?, String?) -> Unit = { _, _, _, _ -> },
+  onUpdatePartNote: (Int, String?) -> Unit = { _, _ -> },
+  onDeletePart: (Int) -> Unit = {},
   onDismissBottomSheet: () -> Unit,
   onReopenBottomSheet: () -> Unit,
   onClearStatusBanner: () -> Unit = {},
@@ -810,17 +818,21 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 7. Full-Screen AI Part Identification View
-  if (uiState.isBottomSheetVisible && uiState.detectedParts.isNotEmpty()) {
+  // 7. Full-Screen Part Identification View
+  if (uiState.isBottomSheetVisible) {
     BackHandler(onBack = onDismissBottomSheet)
     Surface(
       modifier = Modifier.fillMaxSize(),
       color = Color(0xFF111827),
       contentColor = Color.White,
     ) {
+      val customerLabel =
+        uiState.selectedHubCustomer?.name
+          ?: uiState.activeCustomer?.name
+          ?: "Job Site Capture"
       val locLabel = uiState.activeCustomerLocation?.label?.let { " ($it)" }.orEmpty()
       AiPartAnalysisBottomSheet(
-        customerName = (uiState.activeCustomer?.name ?: "Job Site Capture") + locLabel,
+        customerName = customerLabel + locLabel,
         parts = uiState.detectedParts,
         searchSites = uiState.searchSites,
         onOpenSearchSitesSettings = {
@@ -832,6 +844,10 @@ internal fun FieldCameraContent(
           val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl))
           context.startActivity(intent)
         },
+        onAddPart = onAddPart,
+        onUpdatePart = onUpdatePart,
+        onUpdatePartNote = onUpdatePartNote,
+        onDeletePart = onDeletePart,
         onClose = onDismissBottomSheet,
       )
     }
@@ -2559,7 +2575,8 @@ private fun CustomerPhotosSection(
           parts.any { part ->
             part.partName.lowercase().contains(query) ||
               part.modelNumber?.lowercase()?.contains(query) == true ||
-              part.searchQuery.lowercase().contains(query)
+              part.searchQuery.lowercase().contains(query) ||
+              part.notes?.lowercase()?.contains(query) == true
           }
         val rawJsonMatch = photo.aiAnalysisJson?.toString()?.lowercase()?.contains(query) == true
         val noteMatch = photo.notes.lowercase().contains(query)
@@ -3032,7 +3049,7 @@ private fun CustomerPhotosSection(
                         contentColor = Color.White,
                       ),
                   ) {
-                    Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+                    Text("View ${parts.size} Part(s)", style = MaterialTheme.typography.labelSmall)
                   }
                 } else if (photo.imageUrl.startsWith("file://")) {
                   Surface(
@@ -3048,16 +3065,13 @@ private fun CustomerPhotosSection(
                     )
                   }
                 } else {
-                  Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF334155),
+                  OutlinedButton(
+                    onClick = { onShowPartsForPhoto(photo) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(34.dp),
                   ) {
-                    Text(
-                      text = "Pending AI ID",
-                      color = Color(0xFFCBD5E1),
-                      style = MaterialTheme.typography.labelSmall,
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
+                    Text("+ Parts", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                   }
                 }
               }
@@ -3379,6 +3393,15 @@ private fun FullScreenPhotoViewerDialog(
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                   )
+                }
+              } else {
+                OutlinedButton(
+                  onClick = onShowParts,
+                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                  modifier = Modifier.height(34.dp),
+                ) {
+                  Text("+ Parts", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 }
               }
             }
@@ -4482,9 +4505,17 @@ private fun AiPartAnalysisBottomSheet(
   searchSites: List<SearchSite>,
   onOpenSearchSitesSettings: () -> Unit,
   onSearchPartOnSite: (SearchSite, String) -> Unit,
+  onAddPart: (String, String?, String?) -> Unit,
+  onUpdatePart: (Int, String, String?, String?) -> Unit,
+  onUpdatePartNote: (Int, String?) -> Unit,
+  onDeletePart: (Int) -> Unit,
   onClose: () -> Unit,
 ) {
   var partPendingSiteSelection by remember { mutableStateOf<HvacPartAnalysis?>(null) }
+  var showAddPartDialog by remember { mutableStateOf(false) }
+  var partPendingEdit by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
+  var partPendingNoteEdit by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
+  var partPendingDeleteConfirmation by remember { mutableStateOf<Pair<Int, HvacPartAnalysis>?>(null) }
   val context = LocalContext.current
 
   Column(
@@ -4513,7 +4544,7 @@ private fun AiPartAnalysisBottomSheet(
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Text(
-          text = "AI HVAC Part ID",
+          text = "HVAC Parts (${parts.size})",
           style = MaterialTheme.typography.titleMedium,
           fontWeight = FontWeight.Bold,
           color = Color.White,
@@ -4526,87 +4557,210 @@ private fun AiPartAnalysisBottomSheet(
           overflow = TextOverflow.Ellipsis,
         )
       }
-      TextButton(onClick = onOpenSearchSitesSettings) {
-        Text("⚙ Sites", color = Color(0xFF34D399))
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        FilledTonalButton(
+          onClick = { showAddPartDialog = true },
+          colors =
+            ButtonDefaults.filledTonalButtonColors(
+              containerColor = Color(0xFF0F93E8),
+              contentColor = Color.White,
+            ),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+          modifier = Modifier.height(36.dp),
+        ) {
+          Text("+ Part", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        }
+        TextButton(onClick = onOpenSearchSitesSettings) {
+          Text("⚙ Sites", color = Color(0xFF34D399))
+        }
       }
     }
 
     LazyColumn(
       verticalArrangement = Arrangement.spacedBy(12.dp),
+      modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
     ) {
-      items(parts) { part ->
-        Card(
-          colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2937)),
-          shape = RoundedCornerShape(14.dp),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+      if (parts.isEmpty()) {
+        item {
+          Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2937)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
           ) {
-            Text(
-              text = part.partName,
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.SemiBold,
-              color = Color.White,
-            )
-            if (!part.modelNumber.isNullOrBlank()) {
-              Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color(0xFF0F291E),
-                modifier =
-                  Modifier.clickable {
-                    copyTextToClipboard(context, "Model Number", part.modelNumber)
-                  },
-              ) {
-                Row(
-                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                  Text(
-                    text = "Model / Part #: ${part.modelNumber}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF34D399),
-                  )
-                  Text("📋", style = MaterialTheme.typography.bodySmall)
-                }
-              }
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            Column(
+              modifier = Modifier.fillMaxWidth().padding(24.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+              Text(
+                text = "📦 No HVAC parts recorded yet",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+              )
+              Text(
+                text = "Add replacement parts, identified components, model numbers, or notes for this photo.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF94A3B8),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+              )
               Button(
-                onClick = { partPendingSiteSelection = part },
-                modifier = Modifier.weight(1f).height(40.dp),
+                onClick = { showAddPartDialog = true },
                 colors =
                   ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF0F93E8),
                     contentColor = Color.White,
                   ),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
               ) {
-                Text("🔍 Search Online", style = MaterialTheme.typography.labelMedium)
+                Text("+ Add First Part", fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+        }
+      } else {
+        itemsIndexed(parts) { index, part ->
+          Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F2937)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Column(
+              modifier = Modifier.padding(16.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "${index + 1}. ${part.partName}",
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                  modifier = Modifier.weight(1f),
+                )
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  IconButton(
+                    onClick = { partPendingEdit = index to part },
+                    modifier = Modifier.size(32.dp),
+                  ) {
+                    Text("✏", style = MaterialTheme.typography.bodyMedium)
+                  }
+                  IconButton(
+                    onClick = { partPendingDeleteConfirmation = index to part },
+                    modifier = Modifier.size(32.dp),
+                  ) {
+                    Text("🗑", style = MaterialTheme.typography.bodyMedium)
+                  }
+                }
               }
 
-              FilledTonalButton(
-                onClick = {
-                  val textToCopy = part.modelNumber?.takeIf { it.isNotBlank() } ?: part.partName
-                  copyTextToClipboard(context, "Model / Part Number", textToCopy)
-                },
-                modifier = Modifier.height(40.dp),
-                colors =
-                  ButtonDefaults.filledTonalButtonColors(
-                    containerColor = Color(0xFF1E3A8A),
-                    contentColor = Color(0xFF38BDF8),
-                  ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+              if (!part.modelNumber.isNullOrBlank()) {
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = Color(0xFF0F291E),
+                  modifier =
+                    Modifier.clickable {
+                      copyTextToClipboard(context, "Model Number", part.modelNumber)
+                    },
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Text(
+                      text = "Model / Part #: ${part.modelNumber}",
+                      style = MaterialTheme.typography.bodyMedium,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF34D399),
+                    )
+                    Text("📋", style = MaterialTheme.typography.bodySmall)
+                  }
+                }
+              }
+
+              // Part Notes row
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (!part.notes.isNullOrBlank()) Color(0xFF0E2243) else Color(0x330E2243),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .clickable { partPendingNoteEdit = index to part },
               ) {
-                Text("📋 Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Row(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Text("📝", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                      text = part.notes?.ifBlank { null } ?: "+ Add note (condition, specs, etc.)...",
+                      color = if (!part.notes.isNullOrBlank()) Color(0xFFE2E8F0) else Color(0xFF94A3B8),
+                      style = MaterialTheme.typography.bodySmall,
+                      fontStyle =
+                        if (part.notes.isNullOrBlank()) androidx.compose.ui.text.font.FontStyle.Italic
+                        else androidx.compose.ui.text.font.FontStyle.Normal,
+                      maxLines = 2,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
+                  Text(
+                    text = if (!part.notes.isNullOrBlank()) "Edit Note" else "+ Note",
+                    color = Color(0xFF38BDF8),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+
+              Spacer(modifier = Modifier.height(2.dp))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Button(
+                  onClick = { partPendingSiteSelection = part },
+                  modifier = Modifier.weight(1f).height(40.dp),
+                  colors =
+                    ButtonDefaults.buttonColors(
+                      containerColor = Color(0xFF0F93E8),
+                      contentColor = Color.White,
+                    ),
+                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                  Text("🔍 Search Online", style = MaterialTheme.typography.labelMedium)
+                }
+
+                FilledTonalButton(
+                  onClick = {
+                    val textToCopy = part.modelNumber?.takeIf { it.isNotBlank() } ?: part.partName
+                    copyTextToClipboard(context, "Model / Part Number", textToCopy)
+                  },
+                  modifier = Modifier.height(40.dp),
+                  colors =
+                    ButtonDefaults.filledTonalButtonColors(
+                      containerColor = Color(0xFF1E3A8A),
+                      contentColor = Color(0xFF38BDF8),
+                    ),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text("📋 Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
               }
             }
           }
@@ -4617,6 +4771,7 @@ private fun AiPartAnalysisBottomSheet(
 
   // Popup to pick which configured search site to open for the selected HVAC part
   partPendingSiteSelection?.let { selectedPart ->
+    val effectiveQuery = selectedPart.searchQuery.ifBlank { "${selectedPart.partName} ${selectedPart.modelNumber.orEmpty()}".trim() }
     AlertDialog(
       onDismissRequest = { partPendingSiteSelection = null },
       containerColor = Color(0xFF132D57),
@@ -4645,7 +4800,7 @@ private fun AiPartAnalysisBottomSheet(
                 Modifier.fillMaxWidth()
                   .clickable {
                     partPendingSiteSelection = null
-                    onSearchPartOnSite(site, selectedPart.searchQuery)
+                    onSearchPartOnSite(site, effectiveQuery)
                   },
             ) {
               Row(
@@ -4660,7 +4815,7 @@ private fun AiPartAnalysisBottomSheet(
                     color = Color.White,
                   )
                   Text(
-                    text = "Search: \"${selectedPart.searchQuery}\"",
+                    text = "Search: \"$effectiveQuery\"",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF38BDF8),
                     maxLines = 1,
@@ -4695,6 +4850,213 @@ private fun AiPartAnalysisBottomSheet(
       },
     )
   }
+
+  // Add Part Dialog
+  if (showAddPartDialog) {
+    AddEditHvacPartDialog(
+      initialPart = null,
+      onConfirm = { name, model, notes ->
+        onAddPart(name, model, notes)
+        showAddPartDialog = false
+      },
+      onDismiss = { showAddPartDialog = false },
+    )
+  }
+
+  // Edit Part Dialog
+  partPendingEdit?.let { (index, part) ->
+    AddEditHvacPartDialog(
+      initialPart = part,
+      onConfirm = { name, model, notes ->
+        onUpdatePart(index, name, model, notes)
+        partPendingEdit = null
+      },
+      onDismiss = { partPendingEdit = null },
+    )
+  }
+
+  // Edit Part Note Dialog
+  partPendingNoteEdit?.let { (index, part) ->
+    EditPartNoteDialog(
+      partName = part.partName,
+      initialNotes = part.notes.orEmpty(),
+      onConfirm = { notes ->
+        onUpdatePartNote(index, notes)
+        partPendingNoteEdit = null
+      },
+      onDismiss = { partPendingNoteEdit = null },
+    )
+  }
+
+  // Delete Part Confirmation Dialog
+  partPendingDeleteConfirmation?.let { (index, part) ->
+    AlertDialog(
+      onDismissRequest = { partPendingDeleteConfirmation = null },
+      containerColor = Color(0xFF1F2937),
+      titleContentColor = Color.White,
+      textContentColor = Color.White,
+      title = {
+        Text("Delete Part?", fontWeight = FontWeight.Bold)
+      },
+      text = {
+        Text("Are you sure you want to remove '${part.partName}' from this photo?")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            onDeletePart(index)
+            partPendingDeleteConfirmation = null
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFFEE4D38),
+              contentColor = Color.White,
+            ),
+        ) {
+          Text("Delete", fontWeight = FontWeight.Bold)
+        }
+      },
+      dismissButton = {
+        OutlinedButton(onClick = { partPendingDeleteConfirmation = null }) {
+          Text("Cancel", color = Color(0xFF94A3B8))
+        }
+      },
+    )
+  }
+}
+
+@Composable
+private fun AddEditHvacPartDialog(
+  initialPart: HvacPartAnalysis? = null,
+  onConfirm: (partName: String, modelNumber: String?, notes: String?) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var partName by remember { mutableStateOf(initialPart?.partName.orEmpty()) }
+  var modelNumber by remember { mutableStateOf(initialPart?.modelNumber.orEmpty()) }
+  var notes by remember { mutableStateOf(initialPart?.notes.orEmpty()) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = {
+      Text(
+        if (initialPart == null) "Add HVAC Part" else "Edit HVAC Part",
+        fontWeight = FontWeight.Bold,
+      )
+    },
+    text = {
+      Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        OutlinedTextField(
+          value = partName,
+          onValueChange = { partName = it },
+          label = { Text("Part Name *") },
+          placeholder = { Text("e.g. Capacitor 45/5 uF, Contactor") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = modelNumber,
+          onValueChange = { modelNumber = it },
+          label = { Text("Model / Part # (Optional)") },
+          placeholder = { Text("e.g. PRCFD455, 42CF35AJ") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = notes,
+          onValueChange = { notes = it },
+          label = { Text("Technician Notes (Optional)") },
+          placeholder = { Text("Condition, specs, or replacement details...") },
+          minLines = 2,
+          maxLines = 4,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          if (partName.isNotBlank()) {
+            onConfirm(
+              partName.trim(),
+              modelNumber.trim().ifBlank { null },
+              notes.trim().ifBlank { null },
+            )
+          }
+        },
+        enabled = partName.isNotBlank(),
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("Save", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      OutlinedButton(onClick = onDismiss) {
+        Text("Cancel", color = Color(0xFF94A3B8))
+      }
+    },
+  )
+}
+
+@Composable
+private fun EditPartNoteDialog(
+  partName: String,
+  initialNotes: String,
+  onConfirm: (String?) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var noteText by remember { mutableStateOf(initialNotes) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = {
+      Text("Part Note: $partName", fontWeight = FontWeight.Bold)
+    },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+          value = noteText,
+          onValueChange = { noteText = it },
+          label = { Text("Note / Condition / Specs") },
+          placeholder = { Text("e.g. Tested 38 uF, top bulging, replaced") },
+          minLines = 3,
+          maxLines = 6,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          onConfirm(noteText.trim().ifBlank { null })
+        },
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("Save Note", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      OutlinedButton(onClick = onDismiss) {
+        Text("Cancel", color = Color(0xFF94A3B8))
+      }
+    },
+  )
 }
 
 private fun capturePhotoToCache(

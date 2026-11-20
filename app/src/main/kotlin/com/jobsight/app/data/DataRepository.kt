@@ -73,6 +73,7 @@ interface DataRepository {
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
   suspend fun updatePhotoNotes(photoId: Long, notes: String)
   suspend fun updatePhotoPinned(photoId: Long, isPinned: Boolean)
+  suspend fun updatePhotoParts(photoId: Long, parts: List<HvacPartAnalysis>)
   suspend fun deletePhotos(photos: List<CapturedPhotoRow>)
   suspend fun downloadImageBytes(imageUrl: String): ByteArray?
 
@@ -575,6 +576,31 @@ class DefaultDataRepository(
         if (!response.isSuccessful) {
           val body = response.body?.string().orEmpty()
           throw IOException("Failed to update photo pin (${response.code}): $body")
+        }
+      }
+    }
+
+  override suspend fun updatePhotoParts(photoId: Long, parts: List<HvacPartAnalysis>) =
+    withContext(Dispatchers.IO) {
+      val jsonElement = AnalysisJsonParser.encodeParts(parts)
+      val payload =
+        buildJsonObject {
+          put("ai_analysis_json", jsonElement)
+        }.toString()
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/captured_photos?id=eq.$photoId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .patch(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to update photo parts (${response.code}): $body")
         }
       }
     }

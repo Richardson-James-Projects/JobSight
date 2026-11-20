@@ -38,6 +38,7 @@ data class FieldCameraUiState(
   val isUploadingPhoto: Boolean = false,
   val lastCapturedPhoto: CapturedPhotoRow? = null,
   val isAwaitingAiAnalysis: Boolean = false,
+  val activePhotoForParts: CapturedPhotoRow? = null,
   val detectedParts: List<HvacPartAnalysis> = emptyList(),
   val isBottomSheetVisible: Boolean = false,
   val isCustomerPickerVisible: Boolean = false,
@@ -908,12 +909,93 @@ class MainScreenViewModel(
 
   fun showPartsForPhoto(photo: CapturedPhotoRow) {
     val parts = AnalysisJsonParser.parseParts(photo.aiAnalysisJson)
-    if (parts.isNotEmpty()) {
-      _uiState.update {
-        it.copy(
-          detectedParts = parts,
-          isBottomSheetVisible = true,
-        )
+    _uiState.update {
+      it.copy(
+        activePhotoForParts = photo,
+        detectedParts = parts,
+        isBottomSheetVisible = true,
+      )
+    }
+  }
+
+  fun addPartToActivePhoto(partName: String, modelNumber: String?, notes: String?) {
+    val photo = _uiState.value.activePhotoForParts ?: return
+    val cleanName = partName.trim()
+    if (cleanName.isBlank()) return
+    val cleanModel = modelNumber?.trim()?.ifBlank { null }
+    val cleanNotes = notes?.trim()?.ifBlank { null }
+    val query = "$cleanName ${cleanModel.orEmpty()}".trim()
+    val newPart =
+      HvacPartAnalysis(
+        partName = cleanName,
+        modelNumber = cleanModel,
+        searchQuery = query,
+        notes = cleanNotes,
+      )
+    val updatedParts = _uiState.value.detectedParts + newPart
+    persistPartsForActivePhoto(photo.id, updatedParts)
+  }
+
+  fun updatePartInActivePhoto(index: Int, partName: String, modelNumber: String?, notes: String?) {
+    val photo = _uiState.value.activePhotoForParts ?: return
+    val currentList = _uiState.value.detectedParts.toMutableList()
+    if (index !in currentList.indices) return
+    val cleanName = partName.trim().ifBlank { currentList[index].partName }
+    val cleanModel = modelNumber?.trim()?.ifBlank { null }
+    val cleanNotes = notes?.trim()?.ifBlank { null }
+    val query = "$cleanName ${cleanModel.orEmpty()}".trim()
+    currentList[index] =
+      currentList[index].copy(
+        partName = cleanName,
+        modelNumber = cleanModel,
+        searchQuery = query,
+        notes = cleanNotes,
+      )
+    persistPartsForActivePhoto(photo.id, currentList)
+  }
+
+  fun updatePartNoteInActivePhoto(index: Int, notes: String?) {
+    val photo = _uiState.value.activePhotoForParts ?: return
+    val currentList = _uiState.value.detectedParts.toMutableList()
+    if (index !in currentList.indices) return
+    val cleanNotes = notes?.trim()?.ifBlank { null }
+    currentList[index] = currentList[index].copy(notes = cleanNotes)
+    persistPartsForActivePhoto(photo.id, currentList)
+  }
+
+  fun deletePartFromActivePhoto(index: Int) {
+    val photo = _uiState.value.activePhotoForParts ?: return
+    val currentList = _uiState.value.detectedParts.toMutableList()
+    if (index !in currentList.indices) return
+    currentList.removeAt(index)
+    persistPartsForActivePhoto(photo.id, currentList)
+  }
+
+  private fun persistPartsForActivePhoto(photoId: Long, updatedParts: List<HvacPartAnalysis>) {
+    val jsonElement = AnalysisJsonParser.encodeParts(updatedParts)
+    _uiState.update { state ->
+      val updatedPhotos =
+        state.customerPhotos.map {
+          if (it.id == photoId) it.copy(aiAnalysisJson = jsonElement) else it
+        }
+      val updatedActivePhoto =
+        state.activePhotoForParts?.takeIf { it.id == photoId }?.copy(aiAnalysisJson = jsonElement)
+          ?: state.activePhotoForParts
+      state.copy(
+        detectedParts = updatedParts,
+        customerPhotos = updatedPhotos,
+        activePhotoForParts = updatedActivePhoto,
+      )
+    }
+    if (photoId > 0) {
+      viewModelScope.launch {
+        try {
+          dataRepository.updatePhotoParts(photoId, updatedParts)
+        } catch (e: Exception) {
+          _uiState.update {
+            it.copy(errorMessage = "Could not save parts: ${e.message}")
+          }
+        }
       }
     }
   }

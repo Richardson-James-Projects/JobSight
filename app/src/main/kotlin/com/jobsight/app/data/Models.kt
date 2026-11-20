@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
 @Serializable
 data class CustomerLocation(
@@ -73,7 +74,8 @@ data class CapturedPhotoRow(
 data class HvacPartAnalysis(
   @SerialName("part_name") val partName: String,
   @SerialName("model_number") val modelNumber: String? = null,
-  @SerialName("search_query") val searchQuery: String,
+  @SerialName("search_query") val searchQuery: String = "",
+  val notes: String? = null,
 )
 
 @Serializable
@@ -196,5 +198,9 @@ object AnalysisJsonParser {
     } catch (_: Exception) {
       emptyList()
     }
+  }
+
+  fun encodeParts(parts: List<HvacPartAnalysis>): JsonElement {
+    return json.encodeToJsonElement(parts)
   }
 }
