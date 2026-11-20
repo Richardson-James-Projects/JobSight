@@ -710,7 +710,7 @@ private fun CustomerHubBottomSheet(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column {
+      Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
         Text(
           text = "Customers, Locations & Photos",
           style = MaterialTheme.typography.titleLarge,
@@ -731,7 +731,7 @@ private fun CustomerHubBottomSheet(
             contentColor = Color.White,
           ),
       ) {
-        Text("+ Customer")
+        Text("+ New Customer", fontWeight = FontWeight.Bold)
       }
     }
 
@@ -767,12 +767,11 @@ private fun CustomerHubBottomSheet(
         color = Color(0xFF1E293B),
         modifier = Modifier.fillMaxWidth(),
       ) {
-        Row(
+        Column(
           modifier = Modifier.padding(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          Column(modifier = Modifier.weight(1f)) {
+          Column(modifier = Modifier.fillMaxWidth()) {
             Text(
               text = selectedCustomer.name,
               style = MaterialTheme.typography.titleMedium,
@@ -786,13 +785,28 @@ private fun CustomerHubBottomSheet(
               color = Color(0xFF94A3B8),
             )
           }
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Button(
+              onClick = { showAddLocationDialog = true },
+              colors =
+                ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF0284C7),
+                  contentColor = Color.White,
+                ),
+              modifier = Modifier.weight(1f),
+            ) {
+              Text("+ Add Site Location", style = MaterialTheme.typography.labelMedium)
+            }
             OutlinedButton(
               onClick = { onSetAsActiveCustomer(selectedCustomer.id) },
               colors =
                 ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+              modifier = Modifier.weight(1f),
             ) {
-              Text("Tag Camera Here", style = MaterialTheme.typography.labelSmall)
+              Text("Tag Camera Here", style = MaterialTheme.typography.labelMedium)
             }
           }
         }
@@ -1005,9 +1019,10 @@ private fun CustomerLocationsSection(
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Text(
-        text = "Saved Job Site Locations for ${customer.name}",
+        text = "Saved Job Site Locations",
         style = MaterialTheme.typography.titleSmall,
         color = Color(0xFFCBD5E1),
+        modifier = Modifier.weight(1f).padding(end = 8.dp),
       )
       Button(
         onClick = onAddLocationClick,
