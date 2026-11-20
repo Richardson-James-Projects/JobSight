@@ -1032,7 +1032,24 @@ private fun CustomerTagListDialog(
   var showNewCustomerDialog by remember { mutableStateOf(false) }
   var selectedCustomerForLocationStep by remember { mutableStateOf<Customer?>(null) }
   var showNewLocationForSelectedCustomer by remember { mutableStateOf(false) }
+  var customerSearchQuery by remember { mutableStateOf("") }
   val context = LocalContext.current
+
+  val filteredCustomers =
+    remember(uiState.customers, customerSearchQuery) {
+      if (customerSearchQuery.isBlank()) {
+        uiState.customers
+      } else {
+        val q = customerSearchQuery.trim().lowercase()
+        uiState.customers.filter { c ->
+          c.name.lowercase().contains(q) ||
+            c.address.lowercase().contains(q) ||
+            c.locations.any { loc ->
+              loc.label.lowercase().contains(q) || loc.address.lowercase().contains(q)
+            }
+        }
+      }
+    }
 
   // Keep selectedCustomerForLocationStep in sync with latest customers list
   val activeStepCustomer =
@@ -1200,8 +1217,55 @@ private fun CustomerTagListDialog(
             }
           }
 
-          // 2. Customer list — tapping a customer moves to Step 2 (Select Location for that customer)
-          items(uiState.customers, key = { it.id }) { customer ->
+          // 2. Search Customers
+          item {
+            OutlinedTextField(
+              value = customerSearchQuery,
+              onValueChange = { customerSearchQuery = it },
+              placeholder = { Text("Search customer or address...") },
+              leadingIcon = {
+                Icon(
+                  painter = painterResource(id = R.drawable.ic_search),
+                  contentDescription = "Search Customers",
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(18.dp),
+                )
+              },
+              trailingIcon = {
+                if (customerSearchQuery.isNotEmpty()) {
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier =
+                      Modifier.size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { customerSearchQuery = "" },
+                  ) {
+                    Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                  }
+                }
+              },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
+          }
+
+          if (filteredCustomers.isEmpty()) {
+            item {
+              Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "No customers match '$customerSearchQuery'",
+                  color = Color(0xFF94A3B8),
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
+            }
+          }
+
+          // 3. Customer list — tapping a customer moves to Step 2 (Select Location for that customer)
+          items(filteredCustomers, key = { it.id }) { customer ->
             val isCurrentCustomer = uiState.manualCustomerOverrideId == customer.id
             Surface(
               shape = RoundedCornerShape(10.dp),
@@ -1509,6 +1573,23 @@ private fun CustomerPhotosBottomSheet(
 
   // Popup list (like Search Sites) to pick which customer's photos to view
   if (showPhotoCustomerPicker) {
+    var pickerSearchQuery by remember { mutableStateOf("") }
+    val filteredPickerCustomers =
+      remember(uiState.customers, pickerSearchQuery) {
+        if (pickerSearchQuery.isBlank()) {
+          uiState.customers
+        } else {
+          val q = pickerSearchQuery.trim().lowercase()
+          uiState.customers.filter { c ->
+            c.name.lowercase().contains(q) ||
+              c.address.lowercase().contains(q) ||
+              c.locations.any { loc ->
+                loc.label.lowercase().contains(q) || loc.address.lowercase().contains(q)
+              }
+          }
+        }
+      }
+
     AlertDialog(
       onDismissRequest = { showPhotoCustomerPicker = false },
       containerColor = Color(0xFF132D57),
@@ -1520,7 +1601,53 @@ private fun CustomerPhotosBottomSheet(
           verticalArrangement = Arrangement.spacedBy(8.dp),
           modifier = Modifier.fillMaxWidth(),
         ) {
-          items(uiState.customers, key = { it.id }) { customer ->
+          item {
+            OutlinedTextField(
+              value = pickerSearchQuery,
+              onValueChange = { pickerSearchQuery = it },
+              placeholder = { Text("Search customer...") },
+              leadingIcon = {
+                Icon(
+                  painter = painterResource(id = R.drawable.ic_search),
+                  contentDescription = "Search",
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(18.dp),
+                )
+              },
+              trailingIcon = {
+                if (pickerSearchQuery.isNotEmpty()) {
+                  Box(
+                    contentAlignment = Alignment.Center,
+                    modifier =
+                      Modifier.size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { pickerSearchQuery = "" },
+                  ) {
+                    Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                  }
+                }
+              },
+              singleLine = true,
+              modifier = Modifier.fillMaxWidth(),
+            )
+          }
+
+          if (filteredPickerCustomers.isEmpty()) {
+            item {
+              Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+              ) {
+                Text(
+                  text = "No customers match '$pickerSearchQuery'",
+                  color = Color(0xFF94A3B8),
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
+            }
+          }
+
+          items(filteredPickerCustomers, key = { it.id }) { customer ->
             val isSelected = selectedCustomer?.id == customer.id
             Surface(
               shape = RoundedCornerShape(10.dp),
@@ -1595,7 +1722,24 @@ private fun AppSettingsBottomSheet(
   var customerForNewLocation by remember { mutableStateOf<Customer?>(null) }
   var customerPendingDeletion by remember { mutableStateOf<Customer?>(null) }
   var locationPendingDeletion by remember { mutableStateOf<Pair<Long, String>?>(null) }
+  var customerSearchQuery by remember { mutableStateOf("") }
   val context = LocalContext.current
+
+  val filteredSettingsCustomers =
+    remember(uiState.customers, customerSearchQuery) {
+      if (customerSearchQuery.isBlank()) {
+        uiState.customers
+      } else {
+        val q = customerSearchQuery.trim().lowercase()
+        uiState.customers.filter { c ->
+          c.name.lowercase().contains(q) ||
+            c.address.lowercase().contains(q) ||
+            c.locations.any { loc ->
+              loc.label.lowercase().contains(q) || loc.address.lowercase().contains(q)
+            }
+        }
+      }
+    }
 
   var newSiteName by remember { mutableStateOf("") }
   var newSiteUrl by remember { mutableStateOf("") }
@@ -1667,11 +1811,52 @@ private fun AppSettingsBottomSheet(
           Text("+ Add Customer", fontWeight = FontWeight.Bold)
         }
 
-        LazyColumn(
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-          modifier = Modifier.weight(1f),
-        ) {
-          items(uiState.customers, key = { it.id }) { customer ->
+        OutlinedTextField(
+          value = customerSearchQuery,
+          onValueChange = { customerSearchQuery = it },
+          placeholder = { Text("Search customers or addresses...") },
+          leadingIcon = {
+            Icon(
+              painter = painterResource(id = R.drawable.ic_search),
+              contentDescription = "Search",
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(18.dp),
+            )
+          },
+          trailingIcon = {
+            if (customerSearchQuery.isNotEmpty()) {
+              Box(
+                contentAlignment = Alignment.Center,
+                modifier =
+                  Modifier.size(28.dp)
+                    .clip(CircleShape)
+                    .clickable { customerSearchQuery = "" },
+              ) {
+                Text("✕", color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+              }
+            }
+          },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (filteredSettingsCustomers.isEmpty()) {
+          Box(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              text = "No customers match '$customerSearchQuery'",
+              color = Color(0xFF94A3B8),
+              style = MaterialTheme.typography.bodyMedium,
+            )
+          }
+        } else {
+          LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f),
+          ) {
+            items(filteredSettingsCustomers, key = { it.id }) { customer ->
             Card(
               colors = CardDefaults.cardColors(containerColor = Color(0xFF132D57)),
               shape = RoundedCornerShape(12.dp),
@@ -1805,6 +1990,7 @@ private fun AppSettingsBottomSheet(
           }
         }
       }
+    }
 
       1 -> {
         // Tab 1: Search Sites Settings
