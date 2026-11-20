@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.location.Location
 import android.net.Uri
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -393,13 +394,12 @@ internal fun FieldCameraContent(
     )
   }
 
-  // 5. Clean Customer Photos Gallery Sheet (no settings clutter!)
+  // 5. Full-Screen Customer Photos Gallery View (no drag-down dismissal when scrolling!)
   if (uiState.isCustomerHubVisible) {
-    val photosSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-      onDismissRequest = onCloseCustomerHub,
-      sheetState = photosSheetState,
-      containerColor = Color(0xFF0F172A),
+    BackHandler(onBack = onCloseCustomerHub)
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = Color(0xFF0F172A),
       contentColor = Color.White,
     ) {
       CustomerPhotosBottomSheet(
@@ -416,13 +416,12 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 6. Dedicated Settings Sheet (Gear ⚙️: Add/Remove Customers, Locations, Search Sites, Geofence Radius)
+  // 6. Full-Screen Dedicated Settings View (Gear ⚙️: Customers, Locations, Search Sites, GPS Radius)
   if (uiState.isSettingsSheetVisible) {
-    val settingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-      onDismissRequest = onCloseSettingsSheet,
-      sheetState = settingsSheetState,
-      containerColor = Color(0xFF0F172A),
+    BackHandler(onBack = onCloseSettingsSheet)
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = Color(0xFF0F172A),
       contentColor = Color.White,
     ) {
       AppSettingsBottomSheet(
@@ -440,13 +439,12 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 7. AI Part Identification Bottom Sheet Card
+  // 7. Full-Screen AI Part Identification View
   if (uiState.isBottomSheetVisible && uiState.detectedParts.isNotEmpty()) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-      onDismissRequest = onDismissBottomSheet,
-      sheetState = sheetState,
-      containerColor = Color(0xFF111827),
+    BackHandler(onBack = onDismissBottomSheet)
+    Surface(
+      modifier = Modifier.fillMaxSize(),
+      color = Color(0xFF111827),
       contentColor = Color.White,
     ) {
       val locLabel = uiState.activeCustomerLocation?.label?.let { " ($it)" }.orEmpty()
@@ -829,31 +827,32 @@ private fun CustomerPhotosBottomSheet(
 
   Column(
     modifier =
-      Modifier.fillMaxWidth()
-        .fillMaxHeight(0.86f)
-        .padding(horizontal = 16.dp)
-        .padding(bottom = 24.dp),
+      Modifier.fillMaxSize()
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .padding(horizontal = 16.dp, vertical = 14.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    // Top Header: Title + Gear Settings button
+    // Top Header: Back to Camera + Title + Gear Settings button
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = "Customer Photos",
-          style = MaterialTheme.typography.titleLarge,
-          fontWeight = FontWeight.Bold,
-          color = Color.White,
-        )
-        Text(
-          text = "Inspect photos and AI part identifications by customer",
-          style = MaterialTheme.typography.bodySmall,
-          color = Color(0xFF94A3B8),
-        )
+      OutlinedButton(
+        onClick = onClose,
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier.height(36.dp),
+      ) {
+        Text("← Camera", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
       }
+      Text(
+        text = "Customer Photos",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+      )
       FilledTonalButton(
         onClick = onOpenSettingsClick,
         colors =
@@ -861,6 +860,8 @@ private fun CustomerPhotosBottomSheet(
             containerColor = Color(0xFF1E293B),
             contentColor = Color.White,
           ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier.height(36.dp),
       ) {
         Text("⚙ Settings", style = MaterialTheme.typography.labelMedium)
       }
@@ -1007,10 +1008,10 @@ private fun AppSettingsBottomSheet(
 
   Column(
     modifier =
-      Modifier.fillMaxWidth()
-        .fillMaxHeight(0.88f)
-        .padding(horizontal = 16.dp)
-        .padding(bottom = 24.dp),
+      Modifier.fillMaxSize()
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .padding(horizontal = 16.dp, vertical = 14.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Row(
@@ -1018,22 +1019,21 @@ private fun AppSettingsBottomSheet(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = "⚙ JobSight Settings",
-          style = MaterialTheme.typography.titleLarge,
-          fontWeight = FontWeight.Bold,
-          color = Color.White,
-        )
-        Text(
-          text = "Manage customers, site locations, search websites & GPS radius",
-          style = MaterialTheme.typography.bodySmall,
-          color = Color(0xFF94A3B8),
-        )
+      OutlinedButton(
+        onClick = onClose,
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier.height(36.dp),
+      ) {
+        Text("← Camera", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
       }
-      TextButton(onClick = onClose) {
-        Text("Done", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
-      }
+      Text(
+        text = "⚙ JobSight Settings",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+      )
+      Spacer(modifier = Modifier.width(64.dp))
     }
 
     SecondaryTabRow(
@@ -1864,9 +1864,10 @@ private fun AiPartAnalysisBottomSheet(
 
   Column(
     modifier =
-      Modifier.fillMaxWidth()
-        .padding(horizontal = 20.dp)
-        .padding(bottom = 32.dp),
+      Modifier.fillMaxSize()
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .padding(horizontal = 20.dp, vertical = 14.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     Row(
@@ -1874,26 +1875,34 @@ private fun AiPartAnalysisBottomSheet(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column(modifier = Modifier.weight(1f)) {
+      OutlinedButton(
+        onClick = onClose,
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        modifier = Modifier.height(36.dp),
+      ) {
+        Text("← Back", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+      }
+      Column(
+        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
         Text(
-          text = "AI HVAC Part Identification",
-          style = MaterialTheme.typography.titleLarge,
+          text = "AI HVAC Part ID",
+          style = MaterialTheme.typography.titleMedium,
           fontWeight = FontWeight.Bold,
           color = Color.White,
         )
         Text(
-          text = "Tagged Customer: $customerName",
+          text = customerName,
           style = MaterialTheme.typography.bodySmall,
           color = Color(0xFF9CA3AF),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
         )
       }
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onOpenSearchSitesSettings) {
-          Text("⚙ Sites", color = Color(0xFF34D399))
-        }
-        TextButton(onClick = onClose) {
-          Text("Done", color = Color(0xFF38BDF8))
-        }
+      TextButton(onClick = onOpenSearchSitesSettings) {
+        Text("⚙ Sites", color = Color(0xFF34D399))
       }
     }
 
