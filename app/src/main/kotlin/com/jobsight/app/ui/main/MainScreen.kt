@@ -214,6 +214,7 @@ fun MainScreen(
       onShowPartsForPhoto = viewModel::showPartsForPhoto,
       onDismissBottomSheet = viewModel::dismissBottomSheet,
       onReopenBottomSheet = viewModel::reopenBottomSheet,
+      onClearStatusBanner = viewModel::clearStatusBanner,
       onDismissError = viewModel::clearError,
       modifier = Modifier.fillMaxSize(),
     )
@@ -285,6 +286,7 @@ internal fun FieldCameraContent(
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onDismissBottomSheet: () -> Unit,
   onReopenBottomSheet: () -> Unit,
+  onClearStatusBanner: () -> Unit = {},
   onDismissError: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -298,6 +300,14 @@ internal fun FieldCameraContent(
   var currentZoomRatio by remember { mutableFloatStateOf(1.0f) }
   var minZoomRatio by remember { mutableFloatStateOf(1.0f) }
   var maxZoomRatio by remember { mutableFloatStateOf(8.0f) }
+
+  // Auto-dismiss notification banner after 30 seconds
+  LaunchedEffect(uiState.statusBannerMessage) {
+    if (uiState.statusBannerMessage != null) {
+      delay(30_000L)
+      onClearStatusBanner()
+    }
+  }
 
   Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0F14))) {
     // 1. Full-screen distortion-free CameraX PreviewView with Pinch-to-Zoom & Tap-to-Focus

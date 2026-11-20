@@ -777,10 +777,10 @@ class MainScreenViewModel(
                 it.copy(
                   isAwaitingAiAnalysis = false,
                   detectedParts = parts,
-                  isBottomSheetVisible = true,
-                  statusBannerMessage = "AI Vision identified ${parts.size} HVAC component(s)",
+                  statusBannerMessage = "AI Vision identified ${parts.size} item(s)",
                 )
               }
+              _uiState.value.selectedHubCustomer?.id?.let { loadPhotosForCustomer(it) }
             }
           }
       }
@@ -828,6 +828,10 @@ class MainScreenViewModel(
     if (_uiState.value.detectedParts.isNotEmpty()) {
       _uiState.update { it.copy(isBottomSheetVisible = true) }
     }
+  }
+
+  fun clearStatusBanner() {
+    _uiState.update { it.copy(statusBannerMessage = null, isAwaitingAiAnalysis = false) }
   }
 
   fun clearError() {
