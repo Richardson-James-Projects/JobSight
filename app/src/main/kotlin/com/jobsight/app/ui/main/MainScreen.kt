@@ -89,7 +89,6 @@ import androidx.navigation3.runtime.NavKey
 import com.jobsight.app.data.AnalysisJsonParser
 import com.jobsight.app.data.CapturedPhotoRow
 import com.jobsight.app.data.Customer
-import com.jobsight.app.data.CustomerLocation
 import com.jobsight.app.data.DefaultDataRepository
 import com.jobsight.app.data.HvacPartAnalysis
 import com.jobsight.app.location.LocationTracker
@@ -194,7 +193,7 @@ internal fun FieldCameraContent(
   onPhotoCapturedToCache: (File) -> Unit,
   onOpenCustomerPicker: () -> Unit,
   onCloseCustomerPicker: () -> Unit,
-  onSelectCustomerManually: (Long?) -> Unit,
+  onSelectCustomerManually: (Long?, Long?) -> Unit,
   onOpenCustomerHub: (Long?) -> Unit,
   onCloseCustomerHub: () -> Unit,
   onSelectHubCustomer: (Long) -> Unit,
@@ -243,7 +242,7 @@ internal fun FieldCameraContent(
         hasLocationPermission = hasLocationPermission,
         onOpenCustomerPicker = onOpenCustomerPicker,
         onOpenCustomerHub = { onOpenCustomerHub(uiState.activeCustomer?.id) },
-        onResetToAutoGps = { onSelectCustomerManually(null) },
+        onResetToAutoGps = { onSelectCustomerManually(null, null) },
       )
 
       // Status / AI Waiting Pill
@@ -323,7 +322,7 @@ internal fun FieldCameraContent(
       }
     }
 
-    // 3. Bottom Zero-Click Shutter Bar
+    // 3. Bottom Zero-Click Shutter Bar (shows Customer + Site Location being tagged)
     Column(
       modifier =
         Modifier.align(Alignment.BottomCenter)
@@ -345,13 +344,15 @@ internal fun FieldCameraContent(
       )
       Spacer(modifier = Modifier.height(8.dp))
       val activeCustomer = uiState.activeCustomer
+      val activeLocation = uiState.activeCustomerLocation
+      val locSuffix = activeLocation?.label?.let { " • $it" }.orEmpty()
       Text(
         text =
           when {
             activeCustomer != null && uiState.isManualSelection ->
-              "Tagging (Manual): ${activeCustomer.name}"
+              "Tagging (Manual): ${activeCustomer.name}$locSuffix"
             activeCustomer != null ->
-              "Auto-tagging: ${activeCustomer.name}"
+              "Auto-tagging: ${activeCustomer.name}$locSuffix"
             else ->
               "Untagged Capture • Tap 'Switch Customer' above to tag manually"
           },
@@ -361,11 +362,11 @@ internal fun FieldCameraContent(
     }
   }
 
-  // 4. Customer Switcher Modal (Auto-Detect vs Manual Customer Override)
+  // 4. Customer & Location Switcher Modal (Auto-Detect vs Manual Customer + Location Override)
   if (uiState.isCustomerPickerVisible) {
     CustomerPickerDialog(
       uiState = uiState,
-      onSelectCustomerManually = onSelectCustomerManually,
+      onSelectCustomerAndLocation = onSelectCustomerManually,
       onManageCustomersClick = {
         onCloseCustomerPicker()
         onOpenCustomerHub(uiState.activeCustomer?.id)
@@ -386,8 +387,8 @@ internal fun FieldCameraContent(
       CustomerHubBottomSheet(
         uiState = uiState,
         onSelectHubCustomer = onSelectHubCustomer,
-        onSetAsActiveCustomer = { customerId ->
-          onSelectCustomerManually(customerId)
+        onSetAsActiveCustomerAndLocation = { customerId, locationId ->
+          onSelectCustomerManually(customerId, locationId)
           onCloseCustomerHub()
         },
         onCreateCustomer = onCreateCustomer,
@@ -408,8 +409,9 @@ internal fun FieldCameraContent(
       containerColor = Color(0xFF111827),
       contentColor = Color.White,
     ) {
+      val locLabel = uiState.activeCustomerLocation?.label?.let { " ($it)" }.orEmpty()
       AiPartAnalysisBottomSheet(
-        customerName = uiState.activeCustomer?.name ?: "Job Site Capture",
+        customerName = (uiState.activeCustomer?.name ?: "Job Site Capture") + locLabel,
         parts = uiState.detectedParts,
         onSearchPartOnline = { query ->
           val searchUri =
@@ -432,6 +434,7 @@ private fun GeofenceHeaderBadge(
   onResetToAutoGps: () -> Unit,
 ) {
   val manualCustomer = uiState.manualSelectedCustomer
+  val manualLocation = uiState.manualSelectedLocation
   val autoDetected = uiState.autoDetectedCustomer
   val closest = uiState.closestMatch
 
@@ -460,7 +463,7 @@ private fun GeofenceHeaderBadge(
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),
       ) {
@@ -485,10 +488,9 @@ private fun GeofenceHeaderBadge(
             text =
               when {
                 manualCustomer != null -> {
-                  val locCount = manualCustomer.locations.size
-                  val firstAddr =
-                    manualCustomer.locations.firstOrNull()?.address ?: manualCustomer.address
-                  "Manual override • $locCount location(s) • $firstAddr"
+                  val locLabel = manualLocation?.label ?: "Primary Site"
+                  val locAddr = manualLocation?.address ?: manualCustomer.address
+                  "Location: $locLabel • $locAddr"
                 }
                 autoDetected != null -> {
                   val matchedLoc = uiState.autoDetectedLocation
@@ -506,9 +508,23 @@ private fun GeofenceHeaderBadge(
             overflow = TextOverflow.Ellipsis,
           )
         }
+
+        if (manualCustomer != null) {
+          Spacer(modifier = Modifier.width(8.dp))
+          OutlinedButton(
+            onClick = onResetToAutoGps,
+            colors =
+              ButtonDefaults.outlinedButtonColors(
+                contentColor = Color(0xFF93C5FD)
+              ),
+            modifier = Modifier.height(32.dp),
+          ) {
+            Text("Use Auto GPS", style = MaterialTheme.typography.labelSmall)
+          }
+        }
       }
 
-      // Action buttons row: Switch Customer | Reset to Auto GPS | Customers & Photos
+      // Two full-width action buttons that never truncate
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -521,25 +537,14 @@ private fun GeofenceHeaderBadge(
               containerColor = Color(0xFF1E293B),
               contentColor = Color.White,
             ),
-          modifier = Modifier.height(34.dp),
+          modifier = Modifier.weight(1f).height(36.dp),
         ) {
-          Text("Switch Customer", style = MaterialTheme.typography.labelSmall)
+          Text(
+            text = "Switch Customer / Site",
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+          )
         }
-
-        if (manualCustomer != null) {
-          OutlinedButton(
-            onClick = onResetToAutoGps,
-            colors =
-              ButtonDefaults.outlinedButtonColors(
-                contentColor = Color(0xFF93C5FD)
-              ),
-            modifier = Modifier.height(34.dp),
-          ) {
-            Text("Use Auto GPS", style = MaterialTheme.typography.labelSmall)
-          }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
 
         Button(
           onClick = onOpenCustomerHub,
@@ -548,9 +553,13 @@ private fun GeofenceHeaderBadge(
               containerColor = Color(0xFF0284C7),
               contentColor = Color.White,
             ),
-          modifier = Modifier.height(34.dp),
+          modifier = Modifier.weight(1f).height(36.dp),
         ) {
-          Text("Customers & Photos", style = MaterialTheme.typography.labelSmall)
+          Text(
+            text = "Customers & Photos",
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+          )
         }
       }
     }
@@ -560,7 +569,7 @@ private fun GeofenceHeaderBadge(
 @Composable
 private fun CustomerPickerDialog(
   uiState: FieldCameraUiState,
-  onSelectCustomerManually: (Long?) -> Unit,
+  onSelectCustomerAndLocation: (Long?, Long?) -> Unit,
   onManageCustomersClick: () -> Unit,
   onDismiss: () -> Unit,
 ) {
@@ -569,7 +578,7 @@ private fun CustomerPickerDialog(
     containerColor = Color(0xFF1E293B),
     titleContentColor = Color.White,
     textContentColor = Color.White,
-    title = { Text("Select Active Customer", fontWeight = FontWeight.Bold) },
+    title = { Text("Select Customer & Site Location", fontWeight = FontWeight.Bold) },
     text = {
       LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -577,13 +586,17 @@ private fun CustomerPickerDialog(
       ) {
         item {
           val isAutoMode = uiState.manualCustomerOverrideId == null
-          val autoDetectedName = uiState.autoDetectedCustomer?.name ?: "None within 100m"
+          val autoDetectedName =
+            uiState.autoDetectedCustomer?.let { cust ->
+              val locName = uiState.autoDetectedLocation?.label?.let { " ($it)" }.orEmpty()
+              "${cust.name}$locName"
+            } ?: "None within 100m"
           Surface(
             shape = RoundedCornerShape(10.dp),
             color = if (isAutoMode) Color(0xFF065F46) else Color(0xFF0F172A),
             modifier =
               Modifier.fillMaxWidth()
-                .clickable { onSelectCustomerManually(null) },
+                .clickable { onSelectCustomerAndLocation(null, null) },
           ) {
             Row(
               modifier = Modifier.padding(12.dp),
@@ -591,7 +604,7 @@ private fun CustomerPickerDialog(
             ) {
               RadioButton(
                 selected = isAutoMode,
-                onClick = { onSelectCustomerManually(null) },
+                onClick = { onSelectCustomerAndLocation(null, null) },
               )
               Spacer(modifier = Modifier.width(6.dp))
               Column {
@@ -613,53 +626,97 @@ private fun CustomerPickerDialog(
         item {
           HorizontalDivider(color = Color(0xFF334155), modifier = Modifier.padding(vertical = 4.dp))
           Text(
-            text = "Or Select Customer Manually:",
+            text = "Or Select Customer & Site Location Manually:",
             style = MaterialTheme.typography.labelMedium,
             color = Color(0xFF94A3B8),
           )
         }
 
         items(uiState.customers) { customer ->
-          val isSelected = uiState.manualCustomerOverrideId == customer.id
-          val closestDist =
-            uiState.currentLocation?.let { deviceLoc ->
-              customer.locations
-                .map { LocationTracker.distanceBetween(deviceLoc, it.latitude, it.longitude) }
-                .minOrNull()
-            }
           Surface(
             shape = RoundedCornerShape(10.dp),
-            color = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF0F172A),
-            modifier =
-              Modifier.fillMaxWidth()
-                .clickable { onSelectCustomerManually(customer.id) },
+            color = Color(0xFF0F172A),
+            modifier = Modifier.fillMaxWidth(),
           ) {
-            Row(
+            Column(
               modifier = Modifier.padding(12.dp),
-              verticalAlignment = Alignment.CenterVertically,
+              verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-              RadioButton(
-                selected = isSelected,
-                onClick = { onSelectCustomerManually(customer.id) },
+              Text(
+                text = customer.name,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
               )
-              Spacer(modifier = Modifier.width(6.dp))
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                  text = customer.name,
-                  fontWeight = FontWeight.SemiBold,
-                  color = Color.White,
-                )
-                Text(
-                  text =
-                    buildString {
-                      append("${customer.locations.size} site location(s)")
-                      if (closestDist != null) {
-                        append(" • Closest: ${closestDist.roundToInt()}m")
-                      }
-                    },
-                  style = MaterialTheme.typography.bodySmall,
-                  color = Color(0xFF94A3B8),
-                )
+
+              if (customer.locations.isEmpty()) {
+                val isSelected = uiState.manualCustomerOverrideId == customer.id
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier =
+                    Modifier.fillMaxWidth()
+                      .clip(RoundedCornerShape(8.dp))
+                      .background(if (isSelected) Color(0xFF1E3A8A) else Color(0xFF1E293B))
+                      .clickable { onSelectCustomerAndLocation(customer.id, null) }
+                      .padding(8.dp),
+                ) {
+                  RadioButton(
+                    selected = isSelected,
+                    onClick = { onSelectCustomerAndLocation(customer.id, null) },
+                  )
+                  Text(
+                    text = "Default Site",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                  )
+                }
+              } else {
+                customer.locations.forEach { loc ->
+                  val isLocSelected =
+                    uiState.manualCustomerOverrideId == customer.id &&
+                      (uiState.manualLocationOverrideId == loc.id ||
+                        (uiState.manualLocationOverrideId == null &&
+                          customer.locations.first().id == loc.id))
+                  val distMeters =
+                    uiState.currentLocation?.let { deviceLoc ->
+                      LocationTracker.distanceBetween(deviceLoc, loc.latitude, loc.longitude)
+                    }
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier =
+                      Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isLocSelected) Color(0xFF1E3A8A) else Color(0xFF1E293B))
+                        .clickable { onSelectCustomerAndLocation(customer.id, loc.id) }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                  ) {
+                    RadioButton(
+                      selected = isLocSelected,
+                      onClick = { onSelectCustomerAndLocation(customer.id, loc.id) },
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        text =
+                          buildString {
+                            append(loc.label)
+                            if (distMeters != null) {
+                              append(" (${distMeters.roundToInt()}m)")
+                            }
+                          },
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodySmall,
+                      )
+                      Text(
+                        text = loc.address,
+                        color = Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                      )
+                    }
+                  }
+                }
               }
             }
           }
@@ -684,7 +741,7 @@ private fun CustomerPickerDialog(
 private fun CustomerHubBottomSheet(
   uiState: FieldCameraUiState,
   onSelectHubCustomer: (Long) -> Unit,
-  onSetAsActiveCustomer: (Long) -> Unit,
+  onSetAsActiveCustomerAndLocation: (Long, Long?) -> Unit,
   onCreateCustomer: (String, String, Boolean, String) -> Unit,
   onAddLocationToCustomer: (Long, String, Boolean, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
@@ -801,7 +858,12 @@ private fun CustomerHubBottomSheet(
               Text("+ Add Site Location", style = MaterialTheme.typography.labelMedium)
             }
             OutlinedButton(
-              onClick = { onSetAsActiveCustomer(selectedCustomer.id) },
+              onClick = {
+                onSetAsActiveCustomerAndLocation(
+                  selectedCustomer.id,
+                  selectedCustomer.locations.firstOrNull()?.id,
+                )
+              },
               colors =
                 ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
               modifier = Modifier.weight(1f),
@@ -831,7 +893,7 @@ private fun CustomerHubBottomSheet(
       }
 
       if (selectedTabIndex == 0) {
-        // Tab 0: Photos Taken by Customer
+        // Tab 0: Photos Taken by Customer (shows Customer + Saved Site Location on every photo)
         CustomerPhotosSection(
           customer = selectedCustomer,
           photos = uiState.customerPhotos,
@@ -847,6 +909,9 @@ private fun CustomerHubBottomSheet(
           customer = selectedCustomer,
           currentLocation = uiState.currentLocation,
           onAddLocationClick = { showAddLocationDialog = true },
+          onTagLocationClick = { locId ->
+            onSetAsActiveCustomerAndLocation(selectedCustomer.id, locId)
+          },
           modifier = Modifier.weight(1f),
         )
       }
@@ -899,7 +964,8 @@ private fun CustomerPhotosSection(
   if (photos.isEmpty()) {
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
       Text(
-        text = "No photos taken for ${customer.name} yet.\nClose this sheet and press the camera shutter to capture one!",
+        text =
+          "No photos taken for ${customer.name} yet.\nClose this sheet and press the camera shutter to capture one!",
         color = Color(0xFF94A3B8),
         style = MaterialTheme.typography.bodyMedium,
       )
@@ -913,7 +979,9 @@ private fun CustomerPhotosSection(
   ) {
     items(photos, key = { it.id }) { photo ->
       val parts = AnalysisJsonParser.parseParts(photo.aiAnalysisJson)
-      val matchedLoc = customer.locations.find { it.id == photo.customerLocationId }
+      val matchedLoc =
+        customer.locations.find { it.id == photo.customerLocationId }
+          ?: customer.locations.firstOrNull()
       val imageBytes = photoBitmapsCache[photo.imageUrl]
       val imageBitmap =
         remember(imageBytes) {
@@ -927,7 +995,10 @@ private fun CustomerPhotosSection(
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+          modifier = Modifier.padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
           // Photo Preview Image
           Box(
             modifier =
@@ -953,6 +1024,35 @@ private fun CustomerPhotosSection(
             }
           }
 
+          // Customer + Site Location metadata card saved with the photo
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFF0F172A),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Column(
+              modifier = Modifier.padding(10.dp),
+              verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+              Text(
+                text = "Customer: ${customer.name}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF38BDF8),
+              )
+              Text(
+                text =
+                  if (matchedLoc != null) {
+                    "Site Location: ${matchedLoc.label} • ${matchedLoc.address}"
+                  } else {
+                    "Site Location: ${customer.address.ifBlank { "Primary Site" }}"
+                  },
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFE2E8F0),
+              )
+            }
+          }
+
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -960,13 +1060,7 @@ private fun CustomerPhotosSection(
           ) {
             Column(modifier = Modifier.weight(1f)) {
               Text(
-                text =
-                  buildString {
-                    append("Photo #${photo.id}")
-                    if (matchedLoc != null) {
-                      append(" • ${matchedLoc.label}")
-                    }
-                  },
+                text = "Photo #${photo.id}",
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
               )
@@ -1007,6 +1101,7 @@ private fun CustomerLocationsSection(
   customer: Customer,
   currentLocation: Location?,
   onAddLocationClick: () -> Unit,
+  onTagLocationClick: (Long) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   Column(
@@ -1055,42 +1150,57 @@ private fun CustomerLocationsSection(
           shape = RoundedCornerShape(12.dp),
           modifier = Modifier.fillMaxWidth(),
         ) {
-          Row(
+          Column(
             modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                text = loc.label,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-              )
-              Text(
-                text = loc.address,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFD1D5DB),
-              )
-              Text(
-                text =
-                  "Coords: ${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF94A3B8),
-              )
-            }
-            if (distMeters != null) {
-              Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isInsideGeofence) Color(0xFF10B981) else Color(0xFF334155),
-              ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
                 Text(
-                  text = "${distMeters.roundToInt()}m",
-                  color = Color.White,
-                  style = MaterialTheme.typography.labelMedium,
+                  text = loc.label,
                   fontWeight = FontWeight.Bold,
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  color = Color.White,
+                )
+                Text(
+                  text = loc.address,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = Color(0xFFD1D5DB),
+                )
+                Text(
+                  text =
+                    "Coords: ${"%.5f".format(loc.latitude)}, ${"%.5f".format(loc.longitude)}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = Color(0xFF94A3B8),
                 )
               }
+              if (distMeters != null) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (isInsideGeofence) Color(0xFF10B981) else Color(0xFF334155),
+                ) {
+                  Text(
+                    text = "${distMeters.roundToInt()}m",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  )
+                }
+              }
+            }
+            OutlinedButton(
+              onClick = { onTagLocationClick(loc.id) },
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+              modifier = Modifier.fillMaxWidth().height(34.dp),
+            ) {
+              Text(
+                text = "Tag Camera Photos at '${loc.label}'",
+                style = MaterialTheme.typography.labelSmall,
+              )
             }
           }
         }

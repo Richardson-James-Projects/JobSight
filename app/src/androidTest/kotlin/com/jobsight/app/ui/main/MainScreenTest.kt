@@ -54,7 +54,7 @@ class MainScreenTest {
         onPhotoCapturedToCache = {},
         onOpenCustomerPicker = {},
         onCloseCustomerPicker = {},
-        onSelectCustomerManually = {},
+        onSelectCustomerManually = { _, _ -> },
         onOpenCustomerHub = {},
         onCloseCustomerHub = {},
         onSelectHubCustomer = {},

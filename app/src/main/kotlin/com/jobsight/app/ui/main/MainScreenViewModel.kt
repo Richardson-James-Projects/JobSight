@@ -27,6 +27,7 @@ data class FieldCameraUiState(
   val currentLocation: Location? = null,
   val closestMatch: CustomerMatch? = null,
   val manualCustomerOverrideId: Long? = null,
+  val manualLocationOverrideId: Long? = null,
   val isUploadingPhoto: Boolean = false,
   val lastCapturedPhoto: CapturedPhotoRow? = null,
   val isAwaitingAiAnalysis: Boolean = false,
@@ -51,6 +52,14 @@ data class FieldCameraUiState(
   val manualSelectedCustomer: Customer?
     get() = manualCustomerOverrideId?.let { id -> customers.find { it.id == id } }
 
+  val manualSelectedLocation: CustomerLocation?
+    get() {
+      val manualCust = manualSelectedCustomer ?: return null
+      return manualLocationOverrideId?.let { locId ->
+        manualCust.locations.find { it.id == locId }
+      } ?: manualCust.locations.firstOrNull()
+    }
+
   val isManualSelection: Boolean
     get() = manualSelectedCustomer != null
 
@@ -58,15 +67,9 @@ data class FieldCameraUiState(
   val activeCustomer: Customer?
     get() = manualSelectedCustomer ?: autoDetectedCustomer
 
-  /** The specific location matched (if auto-detected or if manual customer has a closest location). */
+  /** The specific site location that will be saved with the photo in `captured_photos.customer_location_id`. */
   val activeCustomerLocation: CustomerLocation?
-    get() {
-      val manual = manualSelectedCustomer
-      if (manual != null) {
-        return manual.locations.firstOrNull()
-      }
-      return autoDetectedLocation
-    }
+    get() = if (isManualSelection) manualSelectedLocation else autoDetectedLocation
 
   val selectedHubCustomer: Customer?
     get() =
@@ -140,7 +143,7 @@ class MainScreenViewModel(
     }
   }
 
-  // --- Manual vs Auto Customer Selection ---
+  // --- Manual vs Auto Customer & Location Selection ---
 
   fun openCustomerPicker() {
     _uiState.update { it.copy(isCustomerPickerVisible = true) }
@@ -150,15 +153,25 @@ class MainScreenViewModel(
     _uiState.update { it.copy(isCustomerPickerVisible = false) }
   }
 
-  fun selectCustomerManually(customerId: Long?) {
+  fun selectCustomerManually(customerId: Long?, locationId: Long? = null) {
     _uiState.update { state ->
-      val chosen = customerId?.let { id -> state.customers.find { it.id == id } }
+      val chosenCustomer = customerId?.let { id -> state.customers.find { it.id == id } }
+      val chosenLocation =
+        if (chosenCustomer != null) {
+          locationId?.let { locId -> chosenCustomer.locations.find { it.id == locId } }
+            ?: chosenCustomer.locations.firstOrNull()
+        } else {
+          null
+        }
+
       state.copy(
         manualCustomerOverrideId = customerId,
+        manualLocationOverrideId = chosenLocation?.id,
         isCustomerPickerVisible = false,
         statusBannerMessage =
-          if (chosen != null) {
-            "Manually selected customer: ${chosen.name}"
+          if (chosenCustomer != null) {
+            val locSuffix = chosenLocation?.let { " • ${it.label}" }.orEmpty()
+            "Selected: ${chosenCustomer.name}$locSuffix"
           } else {
             "Resumed GPS Auto-Detect (< 100m geofence)"
           },
@@ -204,7 +217,6 @@ class MainScreenViewModel(
             isLoadingCustomerPhotos = false,
           )
         }
-        // Preload photo image thumbnails in background
         for (photo in photos) {
           if (!_uiState.value.photoBitmapsCache.containsKey(photo.imageUrl)) {
             launch {
@@ -242,7 +254,6 @@ class MainScreenViewModel(
       try {
         val createdCustomer = dataRepository.createCustomer(cleanName)
 
-        // Optionally add initial location if provided
         if (useCurrentGps) {
           val loc = _uiState.value.currentLocation
           if (loc != null) {
@@ -356,19 +367,21 @@ class MainScreenViewModel(
     }
   }
 
-  // --- Camera Capture & Upload ---
+  // --- Camera Capture & Upload (saves both customer_id and customer_location_id) ---
 
   fun onPhotoCapturedToCache(cacheFile: File) {
     val activeCust = _uiState.value.activeCustomer
     val activeLoc = _uiState.value.activeCustomerLocation
     val taggedCustomerName = activeCust?.name ?: "Untagged Site"
+    val taggedLocationLabel = activeLoc?.label?.let { " ($it)" }.orEmpty()
 
     viewModelScope.launch {
       _uiState.update {
         it.copy(
           isUploadingPhoto = true,
           errorMessage = null,
-          statusBannerMessage = "Uploading photo for $taggedCustomerName & flushing cache...",
+          statusBannerMessage =
+            "Uploading photo for $taggedCustomerName$taggedLocationLabel & flushing cache...",
         )
       }
 
@@ -387,7 +400,7 @@ class MainScreenViewModel(
             isAwaitingAiAnalysis = true,
             detectedParts = emptyList(),
             statusBannerMessage =
-              "Uploaded Photo #${insertedRow.id} to $taggedCustomerName (cache flushed). Waiting for AI...",
+              "Saved Photo #${insertedRow.id} to $taggedCustomerName$taggedLocationLabel. Waiting for AI...",
           )
         }
 
