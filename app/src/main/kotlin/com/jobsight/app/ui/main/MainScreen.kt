@@ -1617,8 +1617,7 @@ private fun CustomerPhotosBottomSheet(
   ) {
     // Top Header: Back to Camera + Title + Gear Settings button
     Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
+      modifier = Modifier.fillMaxWidth().height(40.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       OutlinedButton(
@@ -1635,11 +1634,15 @@ private fun CustomerPhotosBottomSheet(
           modifier = Modifier.size(20.dp),
         )
       }
+      Spacer(modifier = Modifier.width(12.dp))
       Text(
         text = "Customer Photos",
         style = MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.Bold,
         color = Color.White,
+        modifier = Modifier.weight(1f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
       FilledTonalButton(
         onClick = onOpenSettingsClick,
@@ -1970,8 +1973,7 @@ private fun AppSettingsBottomSheet(
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
+      modifier = Modifier.fillMaxWidth().height(40.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       OutlinedButton(
@@ -1988,24 +1990,16 @@ private fun AppSettingsBottomSheet(
           modifier = Modifier.size(20.dp),
         )
       }
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        Icon(
-          painter = painterResource(id = R.drawable.ic_settings),
-          contentDescription = "Settings",
-          tint = Color(0xFF38BDF8),
-          modifier = Modifier.size(24.dp),
-        )
-        Text(
-          text = "JobSight Settings",
-          style = MaterialTheme.typography.titleLarge,
-          fontWeight = FontWeight.Bold,
-          color = Color.White,
-        )
-      }
-      Spacer(modifier = Modifier.width(64.dp))
+      Spacer(modifier = Modifier.width(12.dp))
+      Text(
+        text = "JobSight Settings",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = Modifier.weight(1f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
     }
 
     SecondaryTabRow(
@@ -4167,12 +4161,11 @@ private fun InteractiveMapPickerDialog(
         modifier =
           Modifier.fillMaxWidth()
             .background(Color(0xFF132D57))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
         Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.fillMaxWidth().height(40.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
           OutlinedButton(
@@ -4189,13 +4182,16 @@ private fun InteractiveMapPickerDialog(
               modifier = Modifier.size(20.dp),
             )
           }
+          Spacer(modifier = Modifier.width(12.dp))
           Text(
             text = "Tap Rooftop or Search Address",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             color = Color.White,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
-          Spacer(modifier = Modifier.width(48.dp))
         }
 
         Row(
@@ -4702,12 +4698,11 @@ private fun AiPartAnalysisBottomSheet(
       Modifier.fillMaxSize()
         .statusBarsPadding()
         .navigationBarsPadding()
-        .padding(horizontal = 20.dp, vertical = 14.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp),
+        .padding(horizontal = 16.dp, vertical = 14.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
+      modifier = Modifier.fillMaxWidth().height(40.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       OutlinedButton(
@@ -4724,26 +4719,18 @@ private fun AiPartAnalysisBottomSheet(
           modifier = Modifier.size(20.dp),
         )
       }
-      Column(
-        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-      ) {
-        Text(
-          text = "HVAC Parts (${parts.size})",
-          style = MaterialTheme.typography.titleMedium,
-          fontWeight = FontWeight.Bold,
-          color = Color.White,
-        )
-        Text(
-          text = customerName,
-          style = MaterialTheme.typography.bodySmall,
-          color = Color(0xFF9CA3AF),
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
+      Spacer(modifier = Modifier.width(12.dp))
+      Text(
+        text = "HVAC Parts (${parts.size})",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = Color.White,
+        modifier = Modifier.weight(1f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
       Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         FilledTonalButton(
@@ -4758,7 +4745,11 @@ private fun AiPartAnalysisBottomSheet(
         ) {
           Text("+ Part", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         }
-        TextButton(onClick = onOpenSearchSitesSettings) {
+        TextButton(
+          onClick = onOpenSearchSitesSettings,
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+          modifier = Modifier.height(36.dp),
+        ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -4769,8 +4760,37 @@ private fun AiPartAnalysisBottomSheet(
               tint = Color(0xFF34D399),
               modifier = Modifier.size(16.dp),
             )
-            Text("Sites", color = Color(0xFF34D399))
+            Text("Sites", color = Color(0xFF34D399), style = MaterialTheme.typography.labelMedium)
           }
+        }
+      }
+    }
+
+    if (customerName.isNotBlank()) {
+      Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF1F2937),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Icon(
+            painter = painterResource(id = R.drawable.ic_location),
+            contentDescription = null,
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(16.dp),
+          )
+          Text(
+            text = customerName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFFE2E8F0),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
         }
       }
     }
