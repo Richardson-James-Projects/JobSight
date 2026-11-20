@@ -928,6 +928,26 @@ class MainScreenViewModel(
     }
   }
 
+  fun updatePhotoNotes(photoId: Long, notes: String) {
+    viewModelScope.launch {
+      val cleanNotes = notes.trim()
+      _uiState.update { state ->
+        val updated =
+          state.customerPhotos.map {
+            if (it.id == photoId) it.copy(notes = cleanNotes) else it
+          }
+        state.copy(customerPhotos = updated)
+      }
+      try {
+        dataRepository.updatePhotoNotes(photoId, cleanNotes)
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not save photo note: ${e.message}")
+        }
+      }
+    }
+  }
+
   fun clearStatusBanner() {
     _uiState.update { it.copy(statusBannerMessage = null, isAwaitingAiAnalysis = false) }
   }

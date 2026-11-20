@@ -240,6 +240,7 @@ fun MainScreen(
         onAddSearchSite = viewModel::addSearchSite,
         onDeleteSearchSite = viewModel::deleteSearchSite,
         onDeletePhotos = viewModel::deletePhotosForCurrentCustomer,
+        onUpdatePhotoNotes = viewModel::updatePhotoNotes,
         onSignOutCompany = viewModel::signOutCompany,
         onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
         onShowPartsForPhoto = viewModel::showPartsForPhoto,
@@ -500,6 +501,7 @@ internal fun FieldCameraContent(
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit = {},
+  onUpdatePhotoNotes: (Long, String) -> Unit = { _, _ -> },
   onSignOutCompany: () -> Unit = {},
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
@@ -756,6 +758,7 @@ internal fun FieldCameraContent(
           onOpenSettingsSheet()
         },
         onDeletePhotos = onDeletePhotos,
+        onUpdatePhotoNotes = onUpdatePhotoNotes,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -1472,6 +1475,7 @@ private fun CustomerPhotosBottomSheet(
   onSelectHubCustomer: (Long) -> Unit,
   onOpenSettingsClick: () -> Unit,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
+  onUpdatePhotoNotes: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
@@ -1564,6 +1568,7 @@ private fun CustomerPhotosBottomSheet(
         isLoading = uiState.isLoadingCustomerPhotos,
         photoBitmapsCache = uiState.photoBitmapsCache,
         onDeletePhotos = onDeletePhotos,
+        onUpdatePhotoNotes = onUpdatePhotoNotes,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         modifier = Modifier.weight(1f),
@@ -2277,6 +2282,7 @@ private fun CustomerPhotosSection(
   isLoading: Boolean,
   photoBitmapsCache: Map<String, ByteArray>,
   onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
+  onUpdatePhotoNotes: (Long, String) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   modifier: Modifier = Modifier,
@@ -2305,6 +2311,7 @@ private fun CustomerPhotosSection(
   var selectedPhotoIds by remember(customer.id, sortedPhotos.size) { mutableStateOf(emptySet<Long>()) }
   var photosPendingDeleteConfirmation by remember { mutableStateOf<List<CapturedPhotoRow>?>(null) }
   var photoPendingViewer by remember { mutableStateOf<CapturedPhotoRow?>(null) }
+  var photoPendingNoteEdit by remember { mutableStateOf<CapturedPhotoRow?>(null) }
 
   var searchQuery by remember(customer.id) { mutableStateOf("") }
   var selectedLocationId by remember(customer.id) { mutableStateOf<Long?>(null) }
@@ -2332,8 +2339,9 @@ private fun CustomerPhotosSection(
               part.searchQuery.lowercase().contains(query)
           }
         val rawJsonMatch = photo.aiAnalysisJson?.toString()?.lowercase()?.contains(query) == true
+        val noteMatch = photo.notes.lowercase().contains(query)
 
-        locMatch || dateMatch || partMatch || rawJsonMatch
+        locMatch || dateMatch || partMatch || rawJsonMatch || noteMatch
       }
     }
 
@@ -2678,6 +2686,48 @@ private fun CustomerPhotosSection(
                 }
               }
 
+              // Technician Note / Caption preview & edit button
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (photo.notes.isNotBlank()) Color(0xFF1E293B) else Color(0x660E2243),
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .clickable { photoPendingNoteEdit = photo },
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  Row(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  ) {
+                    Text(
+                      text = "📝",
+                      style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                      text = photo.notes.ifBlank { "Add technician note or caption..." },
+                      color = if (photo.notes.isNotBlank()) Color.White else Color(0xFF94A3B8),
+                      style = MaterialTheme.typography.bodySmall,
+                      fontStyle =
+                        if (photo.notes.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic
+                        else androidx.compose.ui.text.font.FontStyle.Normal,
+                      maxLines = 2,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
+                  Text(
+                    text = if (photo.notes.isNotBlank()) "Edit" else "+ Note",
+                    color = Color(0xFF38BDF8),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -2747,7 +2797,20 @@ private fun CustomerPhotosSection(
         photoPendingViewer = null
         onShowPartsForPhoto(photo)
       },
+      onUpdatePhotoNotes = onUpdatePhotoNotes,
       onDismiss = { photoPendingViewer = null },
+    )
+  }
+
+  // Edit Technician Note Dialog
+  photoPendingNoteEdit?.let { photo ->
+    EditPhotoNoteDialog(
+      initialNote = photo.notes,
+      onSave = { newNote ->
+        onUpdatePhotoNotes(photo.id, newNote)
+        photoPendingNoteEdit = null
+      },
+      onDismiss = { photoPendingNoteEdit = null },
     )
   }
 
@@ -2823,8 +2886,12 @@ private fun FullScreenPhotoViewerDialog(
   customer: Customer,
   bitmapBytes: ByteArray?,
   onShowParts: () -> Unit,
+  onUpdatePhotoNotes: (Long, String) -> Unit,
   onDismiss: () -> Unit,
 ) {
+  var currentNote by remember(photo.id, photo.notes) { mutableStateOf(photo.notes) }
+  var showNoteDialog by remember { mutableStateOf(false) }
+
   val imageBitmap =
     remember(bitmapBytes) {
       bitmapBytes?.let { bytes ->
@@ -2980,43 +3047,147 @@ private fun FullScreenPhotoViewerDialog(
               .fillMaxWidth()
               .navigationBarsPadding(),
         ) {
-          Row(
+          Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = formattedDate,
+                  style = MaterialTheme.typography.bodySmall,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White,
+                )
+                matchedLoc?.address?.let { addr ->
+                  if (addr.isNotBlank()) {
+                    Text(
+                      text = addr,
+                      style = MaterialTheme.typography.labelSmall,
+                      color = Color(0xFF94A3B8),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
+                }
+              }
+
               Text(
-                text = formattedDate,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
+                text =
+                  if (scale > 1.05f) "${"%.1f".format(scale)}x • Double-tap resets"
+                  else "Pinch or double-tap to zoom",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF38BDF8),
               )
-              matchedLoc?.address?.let { addr ->
-                if (addr.isNotBlank()) {
+            }
+
+            // Note line inside full-screen viewer
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0x80132D57),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .clickable { showNoteDialog = true },
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Row(
+                  modifier = Modifier.weight(1f).padding(end = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                  Text("📝", style = MaterialTheme.typography.bodySmall)
                   Text(
-                    text = addr,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF94A3B8),
-                    maxLines = 1,
+                    text = currentNote.ifBlank { "Tap to add technician note..." },
+                    color = if (currentNote.isNotBlank()) Color.White else Color(0xFF94A3B8),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                   )
                 }
+                Text(
+                  text = if (currentNote.isNotBlank()) "Edit" else "+ Note",
+                  color = Color(0xFF38BDF8),
+                  style = MaterialTheme.typography.labelSmall,
+                  fontWeight = FontWeight.Bold,
+                )
               }
             }
-
-            Text(
-              text =
-                if (scale > 1.05f) "${"%.1f".format(scale)}x • Double-tap resets"
-                else "Pinch or double-tap to zoom",
-              style = MaterialTheme.typography.labelSmall,
-              color = Color(0xFF38BDF8),
-            )
           }
         }
       }
     }
   }
+
+  if (showNoteDialog) {
+    EditPhotoNoteDialog(
+      initialNote = currentNote,
+      onSave = { updatedText ->
+        currentNote = updatedText
+        onUpdatePhotoNotes(photo.id, updatedText)
+        showNoteDialog = false
+      },
+      onDismiss = { showNoteDialog = false },
+    )
+  }
+}
+
+@Composable
+private fun EditPhotoNoteDialog(
+  initialNote: String,
+  onSave: (String) -> Unit,
+  onDismiss: () -> Unit,
+) {
+  var noteText by remember { mutableStateOf(initialNote) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = Color(0xFF132D57),
+    titleContentColor = Color.White,
+    textContentColor = Color.White,
+    title = { Text("Technician Note", fontWeight = FontWeight.Bold) },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          text = "Add repair details, part info, or service notes to this photo:",
+          style = MaterialTheme.typography.bodySmall,
+          color = Color(0xFF94A3B8),
+        )
+        OutlinedTextField(
+          value = noteText,
+          onValueChange = { noteText = it },
+          placeholder = { Text("e.g. Unit #2 compressor bad, replaced 45/5 cap...") },
+          minLines = 3,
+          maxLines = 5,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = { onSave(noteText) },
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF0F93E8),
+            contentColor = Color.White,
+          ),
+      ) {
+        Text("Save Note", fontWeight = FontWeight.Bold)
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel", color = Color(0xFF94A3B8))
+      }
+    },
+  )
 }
 
 

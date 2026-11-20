@@ -61,6 +61,7 @@ data class CapturedPhotoRow(
   @SerialName("image_url") val imageUrl: String,
   @SerialName("captured_at") val capturedAt: String? = null,
   @SerialName("ai_analysis_json") val aiAnalysisJson: JsonElement? = null,
+  val notes: String = "",
 )
 
 @Serializable

@@ -69,6 +69,7 @@ interface DataRepository {
   suspend fun reverseGeocodeCoordinates(latitude: Double, longitude: Double): String?
 
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
+  suspend fun updatePhotoNotes(photoId: Long, notes: String)
   suspend fun deletePhotos(photos: List<CapturedPhotoRow>)
   suspend fun downloadImageBytes(imageUrl: String): ByteArray?
 
@@ -501,7 +502,7 @@ class DefaultDataRepository(
       val request =
         Request.Builder()
           .url(
-            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json&order=captured_at.desc,id.desc"
+            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json,notes&order=captured_at.desc,id.desc"
           )
           .header("apikey", apiKey)
           .header("Authorization", "Bearer ${authBearerToken()}")
@@ -522,6 +523,30 @@ class DefaultDataRepository(
         }
 
       localQueuedRows + remoteRows
+    }
+
+  override suspend fun updatePhotoNotes(photoId: Long, notes: String) =
+    withContext(Dispatchers.IO) {
+      val payload =
+        buildJsonObject {
+          put("notes", notes.trim())
+        }.toString()
+
+      val request =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/captured_photos?id=eq.$photoId")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer ${authBearerToken()}")
+          .header("Content-Type", "application/json")
+          .patch(payload.toRequestBody("application/json".toMediaType()))
+          .build()
+
+      httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to update photo notes (${response.code}): $body")
+        }
+      }
     }
 
   override suspend fun deletePhotos(photos: List<CapturedPhotoRow>) =
