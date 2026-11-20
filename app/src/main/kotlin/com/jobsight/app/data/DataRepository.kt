@@ -47,6 +47,7 @@ interface DataRepository {
   suspend fun geocodeAddress(addressQuery: String): ResolvedAddress
 
   suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow>
+  suspend fun deletePhotos(photos: List<CapturedPhotoRow>)
   suspend fun downloadImageBytes(imageUrl: String): ByteArray?
 
   suspend fun getSearchSites(): List<SearchSite>
@@ -249,7 +250,7 @@ class DefaultDataRepository : DataRepository {
       val request =
         Request.Builder()
           .url(
-            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json&order=captured_at.desc"
+            "$supabaseUrl/rest/v1/captured_photos?customer_id=eq.$customerId&select=id,customer_id,customer_location_id,image_url,captured_at,ai_analysis_json&order=captured_at.desc,id.desc"
           )
           .header("apikey", apiKey)
           .header("Authorization", "Bearer $apiKey")
@@ -261,7 +262,49 @@ class DefaultDataRepository : DataRepository {
         if (!response.isSuccessful) {
           throw IOException("Failed to fetch photos (${response.code}): $body")
         }
-        json.decodeFromString<List<CapturedPhotoRow>>(body)
+        json.decodeFromString<List<CapturedPhotoRow>>(body).sortedByDescending { it.id }
+      }
+    }
+
+  override suspend fun deletePhotos(photos: List<CapturedPhotoRow>) =
+    withContext(Dispatchers.IO) {
+      if (photos.isEmpty()) return@withContext
+      val idsCsv = photos.joinToString(",") { it.id.toString() }
+
+      // 1. Delete rows from public.captured_photos in a single batch query
+      val dbDeleteRequest =
+        Request.Builder()
+          .url("$supabaseUrl/rest/v1/captured_photos?id=in.($idsCsv)")
+          .header("apikey", apiKey)
+          .header("Authorization", "Bearer $apiKey")
+          .delete()
+          .build()
+
+      httpClient.newCall(dbDeleteRequest).execute().use { response ->
+        if (!response.isSuccessful) {
+          val body = response.body?.string().orEmpty()
+          throw IOException("Failed to delete photos (${response.code}): $body")
+        }
+      }
+
+      // 2. Best-effort delete corresponding files from job_site_photos storage bucket
+      val publicPrefix = "$supabaseUrl/storage/v1/object/public/$storageBucket/"
+      for (photo in photos) {
+        if (photo.imageUrl.startsWith(publicPrefix)) {
+          val objectPath = photo.imageUrl.removePrefix(publicPrefix)
+          try {
+            val storageDeleteReq =
+              Request.Builder()
+                .url("$supabaseUrl/storage/v1/object/$storageBucket/$objectPath")
+                .header("apikey", apiKey)
+                .header("Authorization", "Bearer $apiKey")
+                .delete()
+                .build()
+            httpClient.newCall(storageDeleteReq).execute().close()
+          } catch (_: Exception) {
+            // Ignore individual storage cleanup errors
+          }
+        }
       }
     }
 

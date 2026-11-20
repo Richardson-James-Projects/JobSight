@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -50,6 +52,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -203,6 +207,7 @@ fun MainScreen(
       onSetGeofenceRadius = viewModel::setGeofenceRadiusMeters,
       onAddSearchSite = viewModel::addSearchSite,
       onDeleteSearchSite = viewModel::deleteSearchSite,
+      onDeletePhotos = viewModel::deletePhotosForCurrentCustomer,
       onTriggerDemoAi = viewModel::triggerDemoAiVisionUpdate,
       onShowPartsForPhoto = viewModel::showPartsForPhoto,
       onDismissBottomSheet = viewModel::dismissBottomSheet,
@@ -273,6 +278,7 @@ internal fun FieldCameraContent(
   onSetGeofenceRadius: (Float) -> Unit = {},
   onAddSearchSite: (String, String) -> Unit,
   onDeleteSearchSite: (Long, String) -> Unit,
+  onDeletePhotos: (List<CapturedPhotoRow>) -> Unit = {},
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onDismissBottomSheet: () -> Unit,
@@ -480,6 +486,7 @@ internal fun FieldCameraContent(
           onCloseCustomerHub()
           onOpenSettingsSheet()
         },
+        onDeletePhotos = onDeletePhotos,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         onClose = onCloseCustomerHub,
@@ -1089,6 +1096,7 @@ private fun CustomerPhotosBottomSheet(
   uiState: FieldCameraUiState,
   onSelectHubCustomer: (Long) -> Unit,
   onOpenSettingsClick: () -> Unit,
+  onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   onClose: () -> Unit,
@@ -1180,6 +1188,7 @@ private fun CustomerPhotosBottomSheet(
         photos = uiState.customerPhotos,
         isLoading = uiState.isLoadingCustomerPhotos,
         photoBitmapsCache = uiState.photoBitmapsCache,
+        onDeletePhotos = onDeletePhotos,
         onTriggerDemoAi = onTriggerDemoAi,
         onShowPartsForPhoto = onShowPartsForPhoto,
         modifier = Modifier.weight(1f),
@@ -1701,6 +1710,7 @@ private fun CustomerPhotosSection(
   photos: List<CapturedPhotoRow>,
   isLoading: Boolean,
   photoBitmapsCache: Map<String, ByteArray>,
+  onDeletePhotos: (List<CapturedPhotoRow>) -> Unit,
   onTriggerDemoAi: (Long?) -> Unit,
   onShowPartsForPhoto: (CapturedPhotoRow) -> Unit,
   modifier: Modifier = Modifier,
@@ -1716,7 +1726,7 @@ private fun CustomerPhotosSection(
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
       Text(
         text =
-          "No photos taken for ${customer.name} yet.\nClose this sheet and press the camera shutter to capture one!",
+          "No photos taken for ${customer.name} yet.\nReturn to the camera and press the shutter to capture one!",
         color = Color(0xFF94A3B8),
         style = MaterialTheme.typography.bodyMedium,
       )
@@ -1724,130 +1734,340 @@ private fun CustomerPhotosSection(
     return
   }
 
-  LazyColumn(
+  val sortedPhotos = remember(photos) { photos.sortedByDescending { it.id } }
+  var isSelectionMode by remember(customer.id) { mutableStateOf(false) }
+  var selectedPhotoIds by remember(customer.id, sortedPhotos.size) { mutableStateOf(emptySet<Long>()) }
+  var photosPendingDeleteConfirmation by remember { mutableStateOf<List<CapturedPhotoRow>?>(null) }
+
+  val listState = rememberLazyListState()
+  LaunchedEffect(customer.id, sortedPhotos.firstOrNull()?.id) {
+    if (sortedPhotos.isNotEmpty()) {
+      listState.scrollToItem(0)
+    }
+  }
+
+  Column(
     modifier = modifier.fillMaxWidth(),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    items(photos, key = { it.id }) { photo ->
-      val parts = AnalysisJsonParser.parseParts(photo.aiAnalysisJson)
-      val matchedLoc =
-        customer.locations.find { it.id == photo.customerLocationId }
-          ?: customer.locations.firstOrNull()
-      val imageBytes = photoBitmapsCache[photo.imageUrl]
-      val imageBitmap =
-        remember(imageBytes) {
-          imageBytes?.let { bytes ->
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    // Bulk Selection / Delete Action Bar
+    Surface(
+      shape = RoundedCornerShape(10.dp),
+      color = Color(0xFF132D57),
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      if (!isSelectionMode) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = "${sortedPhotos.size} photo(s)",
+            style = MaterialTheme.typography.labelMedium,
+            color = Color(0xFFCBD5E1),
+          )
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = {
+                isSelectionMode = true
+                selectedPhotoIds = emptySet()
+              },
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+              modifier = Modifier.height(32.dp),
+            ) {
+              Text("Select", style = MaterialTheme.typography.labelSmall)
+            }
+            OutlinedButton(
+              onClick = { photosPendingDeleteConfirmation = sortedPhotos },
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEE4D38)),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+              modifier = Modifier.height(32.dp),
+            ) {
+              Text("Delete All", style = MaterialTheme.typography.labelSmall)
+            }
           }
         }
-
-      Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF132D57)),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Column(
-          modifier = Modifier.padding(12.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp),
+      } else {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Box(
-            modifier =
-              Modifier.fillMaxWidth()
-                .height(190.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFF0B0F14)),
-            contentAlignment = Alignment.Center,
+          val allSelected = selectedPhotoIds.size == sortedPhotos.size
+          TextButton(
+            onClick = {
+              selectedPhotoIds =
+                if (allSelected) emptySet() else sortedPhotos.map { it.id }.toSet()
+            },
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
           ) {
-            if (imageBitmap != null) {
-              Image(
-                bitmap = imageBitmap,
-                contentDescription = "Captured Photo #${photo.id}",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-              )
-            } else {
-              CircularProgressIndicator(
-                modifier = Modifier.size(28.dp),
-                color = Color(0xFF38BDF8),
-                strokeWidth = 2.dp,
-              )
-            }
+            Text(
+              text = if (allSelected) "Clear All" else "Select All (${sortedPhotos.size})",
+              color = Color(0xFF38BDF8),
+              style = MaterialTheme.typography.labelMedium,
+            )
           }
-
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = Color(0xFF0E2243),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Column(
-              modifier = Modifier.padding(10.dp),
-              verticalArrangement = Arrangement.spacedBy(2.dp),
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+              enabled = selectedPhotoIds.isNotEmpty(),
+              onClick = {
+                val chosen = sortedPhotos.filter { it.id in selectedPhotoIds }
+                if (chosen.isNotEmpty()) {
+                  photosPendingDeleteConfirmation = chosen
+                }
+              },
+              colors =
+                ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFFEE4D38),
+                  contentColor = Color.White,
+                ),
+              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+              modifier = Modifier.height(32.dp),
             ) {
               Text(
-                text = "Customer: ${customer.name}",
-                style = MaterialTheme.typography.labelMedium,
+                text = "Delete (${selectedPhotoIds.size})",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF38BDF8),
               )
-              Text(
-                text =
-                  if (matchedLoc != null) {
-                    "Site Location: ${matchedLoc.label} • ${matchedLoc.address}"
-                  } else {
-                    "Site Location: ${customer.address.ifBlank { "Primary Site" }}"
-                  },
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFE2E8F0),
-              )
+            }
+            TextButton(
+              onClick = {
+                isSelectionMode = false
+                selectedPhotoIds = emptySet()
+              },
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) {
+              Text("Cancel", color = Color(0xFF94A3B8), style = MaterialTheme.typography.labelSmall)
             }
           }
+        }
+      }
+    }
 
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+    LazyColumn(
+      state = listState,
+      modifier = Modifier.weight(1f).fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      items(sortedPhotos, key = { it.id }) { photo ->
+        val isPhotoSelected = photo.id in selectedPhotoIds
+        val parts = AnalysisJsonParser.parseParts(photo.aiAnalysisJson)
+        val matchedLoc =
+          customer.locations.find { it.id == photo.customerLocationId }
+            ?: customer.locations.firstOrNull()
+        val imageBytes = photoBitmapsCache[photo.imageUrl]
+        val imageBitmap =
+          remember(imageBytes) {
+            imageBytes?.let { bytes ->
+              BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }
+          }
+        val formattedDate = remember(photo.capturedAt) { formatCapturedDate(photo.capturedAt) }
+
+        Card(
+          colors =
+            CardDefaults.cardColors(
+              containerColor =
+                if (isPhotoSelected) Color(0xFF1A3A6E) else Color(0xFF132D57)
+            ),
+          shape = RoundedCornerShape(14.dp),
+          modifier =
+            Modifier.fillMaxWidth()
+              .then(
+                if (isPhotoSelected) {
+                  Modifier.border(2.dp, Color(0xFFEE4D38), RoundedCornerShape(14.dp))
+                } else {
+                  Modifier
+                }
+              )
+              .clickable(enabled = isSelectionMode) {
+                selectedPhotoIds =
+                  if (isPhotoSelected) selectedPhotoIds - photo.id
+                  else selectedPhotoIds + photo.id
+              },
+        ) {
+          Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                text = "Photo #${photo.id}",
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-              )
-              Text(
-                text = photo.capturedAt?.take(19)?.replace("T", " ") ?: "Just now",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF94A3B8),
-              )
+            Box(
+              modifier =
+                Modifier.fillMaxWidth()
+                  .height(190.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF0B0F14)),
+              contentAlignment = Alignment.Center,
+            ) {
+              if (imageBitmap != null) {
+                Image(
+                  bitmap = imageBitmap,
+                  contentDescription = "Captured Photo on $formattedDate",
+                  contentScale = ContentScale.Crop,
+                  modifier = Modifier.fillMaxSize(),
+                )
+              } else {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(28.dp),
+                  color = Color(0xFF38BDF8),
+                  strokeWidth = 2.dp,
+                )
+              }
+
+              if (isSelectionMode) {
+                Surface(
+                  shape = CircleShape,
+                  color = Color(0xD90E2243),
+                  modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                ) {
+                  Checkbox(
+                    checked = isPhotoSelected,
+                    onCheckedChange = { checked ->
+                      selectedPhotoIds =
+                        if (checked) selectedPhotoIds + photo.id
+                        else selectedPhotoIds - photo.id
+                    },
+                    colors =
+                      CheckboxDefaults.colors(
+                        checkedColor = Color(0xFFEE4D38),
+                        uncheckedColor = Color.White,
+                      ),
+                  )
+                }
+              }
             }
 
-            if (parts.isNotEmpty()) {
-              Button(
-                onClick = { onShowPartsForPhoto(photo) },
-                colors =
-                  ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF059669),
-                    contentColor = Color.White,
-                  ),
-              ) {
-                Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
-              }
-            } else {
-              Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF334155),
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0xFF0E2243),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Column(
+                modifier = Modifier.padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
               ) {
                 Text(
-                  text = "Pending AI ID",
-                  color = Color(0xFFCBD5E1),
-                  style = MaterialTheme.typography.labelSmall,
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  text = "Customer: ${customer.name}",
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF38BDF8),
                 )
+                Text(
+                  text =
+                    if (matchedLoc != null) {
+                      "Site Location: ${matchedLoc.label} • ${matchedLoc.address}"
+                    } else {
+                      "Site Location: ${customer.address.ifBlank { "Primary Site" }}"
+                    },
+                  style = MaterialTheme.typography.bodySmall,
+                  color = Color(0xFFE2E8F0),
+                )
+              }
+            }
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = formattedDate,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White,
+                  style = MaterialTheme.typography.bodyMedium,
+                )
+              }
+
+              if (parts.isNotEmpty()) {
+                Button(
+                  onClick = { onShowPartsForPhoto(photo) },
+                  colors =
+                    ButtonDefaults.buttonColors(
+                      containerColor = Color(0xFF0F93E8),
+                      contentColor = Color.White,
+                    ),
+                ) {
+                  Text("View ${parts.size} AI Part(s)", style = MaterialTheme.typography.labelSmall)
+                }
+              } else {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color(0xFF334155),
+                ) {
+                  Text(
+                    text = "Pending AI ID",
+                    color = Color(0xFFCBD5E1),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  )
+                }
               }
             }
           }
         }
       }
     }
+  }
+
+  photosPendingDeleteConfirmation?.let { toDelete ->
+    AlertDialog(
+      onDismissRequest = { photosPendingDeleteConfirmation = null },
+      containerColor = Color(0xFF132D57),
+      titleContentColor = Color.White,
+      textContentColor = Color.White,
+      title = { Text("Delete ${toDelete.size} Photo(s)?", fontWeight = FontWeight.Bold) },
+      text = {
+        Text(
+          "Are you sure you want to permanently delete ${toDelete.size} photo(s) from ${customer.name}?"
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            photosPendingDeleteConfirmation = null
+            isSelectionMode = false
+            selectedPhotoIds = emptySet()
+            onDeletePhotos(toDelete)
+          },
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = Color(0xFFEE4D38),
+              contentColor = Color.White,
+            ),
+        ) {
+          Text("Delete")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { photosPendingDeleteConfirmation = null }) {
+          Text("Cancel", color = Color(0xFF94A3B8))
+        }
+      },
+    )
+  }
+}
+
+private fun formatCapturedDate(isoTimestamp: String?): String {
+  if (isoTimestamp.isNullOrBlank()) return "Just now"
+  return try {
+    val cleanIso = isoTimestamp.take(19).replace("T", " ")
+    val parser = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).apply {
+      timeZone = java.util.TimeZone.getTimeZone("UTC")
+    }
+    val parsedDate = parser.parse(cleanIso)
+    if (parsedDate != null) {
+      val formatter =
+        java.text.SimpleDateFormat("MMM d, yyyy • h:mm a", java.util.Locale.US).apply {
+          timeZone = java.util.TimeZone.getDefault()
+        }
+      formatter.format(parsedDate)
+    } else {
+      cleanIso
+    }
+  } catch (_: Exception) {
+    isoTimestamp.take(16).replace("T", " ")
   }
 }
 

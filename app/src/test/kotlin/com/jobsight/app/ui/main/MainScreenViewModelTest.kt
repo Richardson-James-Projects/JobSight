@@ -164,6 +164,8 @@ private class FakeJobSightRepository : DataRepository {
 
   override suspend fun getPhotosForCustomer(customerId: Long): List<CapturedPhotoRow> = emptyList()
 
+  override suspend fun deletePhotos(photos: List<CapturedPhotoRow>) {}
+
   override suspend fun downloadImageBytes(imageUrl: String): ByteArray? = null
 
   override suspend fun getSearchSites(): List<SearchSite> = SearchSite.DEFAULT_SITES

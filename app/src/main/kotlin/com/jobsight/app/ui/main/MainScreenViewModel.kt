@@ -337,6 +337,30 @@ class MainScreenViewModel(
     loadPhotosForCustomer(customerId)
   }
 
+  fun deletePhotosForCurrentCustomer(photosToDelete: List<CapturedPhotoRow>) {
+    if (photosToDelete.isEmpty()) return
+    val customerId = _uiState.value.selectedHubCustomer?.id ?: return
+    val count = photosToDelete.size
+
+    viewModelScope.launch {
+      try {
+        dataRepository.deletePhotos(photosToDelete)
+        val deletedIds = photosToDelete.map { it.id }.toSet()
+        _uiState.update { state ->
+          state.copy(
+            customerPhotos = state.customerPhotos.filterNot { it.id in deletedIds },
+            statusBannerMessage = "Deleted $count photo(s)",
+          )
+        }
+        loadPhotosForCustomer(customerId)
+      } catch (e: Exception) {
+        _uiState.update {
+          it.copy(errorMessage = "Could not delete photos: ${e.message}")
+        }
+      }
+    }
+  }
+
   fun loadPhotosForCustomer(customerId: Long) {
     viewModelScope.launch {
       _uiState.update { it.copy(isLoadingCustomerPhotos = true) }
@@ -647,22 +671,35 @@ class MainScreenViewModel(
         val insertedRow =
           dataRepository.uploadPhotoAndFlushCache(
             cacheFile = cacheFile,
-            customerId = activeCust?.id,
+            customerId = activeCust.id,
             customerLocationId = activeLoc?.id?.takeIf { it > 0 },
           )
 
-        _uiState.update {
-          it.copy(
+        val updatedCustomerPhotos =
+          try {
+            dataRepository.getPhotosForCustomer(activeCust.id)
+          } catch (_: Exception) {
+            emptyList()
+          }
+
+        _uiState.update { state ->
+          state.copy(
             isUploadingPhoto = false,
             lastCapturedPhoto = insertedRow,
             isAwaitingAiAnalysis = true,
             detectedParts = emptyList(),
+            customerPhotos =
+              if (state.selectedHubCustomerId == activeCust.id && updatedCustomerPhotos.isNotEmpty()) {
+                updatedCustomerPhotos
+              } else {
+                state.customerPhotos
+              },
             statusBannerMessage =
-              "Saved Photo #${insertedRow.id} to $taggedCustomerName$taggedLocationLabel. Waiting for AI...",
+              "Saved photo to $taggedCustomerName$taggedLocationLabel. Waiting for AI...",
           )
         }
 
-        if (activeCust != null && _uiState.value.selectedHubCustomerId == activeCust.id) {
+        if (_uiState.value.selectedHubCustomerId == activeCust.id) {
           loadPhotosForCustomer(activeCust.id)
         }
 
