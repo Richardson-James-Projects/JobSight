@@ -64,6 +64,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -886,10 +887,15 @@ private fun GeofenceHeaderBadge(
                   containerColor = Color(0xFF0F93E8),
                   contentColor = Color.White,
                 ),
-              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-              modifier = Modifier.height(34.dp),
+              contentPadding = PaddingValues(0.dp),
+              modifier = Modifier.size(34.dp),
             ) {
-              Text("Directions", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+              Icon(
+                painter = painterResource(id = R.drawable.ic_directions),
+                contentDescription = "Directions to Location",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+              )
             }
           }
 
@@ -1333,10 +1339,15 @@ private fun CustomerTagListDialog(
                           containerColor = Color(0xFF0F93E8),
                           contentColor = Color.White,
                         ),
-                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                      modifier = Modifier.height(30.dp),
+                      contentPadding = PaddingValues(0.dp),
+                      modifier = Modifier.size(32.dp),
                     ) {
-                      Text("Directions", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                      Icon(
+                        painter = painterResource(id = R.drawable.ic_directions),
+                        contentDescription = "Directions to ${loc.label}",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                      )
                     }
                     Text(
                       text = if (isSelected) "Selected ✓" else "Select →",
@@ -1745,13 +1756,14 @@ private fun AppSettingsBottomSheet(
                               containerColor = Color(0xFF0F93E8),
                               contentColor = Color.White,
                             ),
-                          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                          modifier = Modifier.height(28.dp),
+                          contentPadding = PaddingValues(0.dp),
+                          modifier = Modifier.size(28.dp),
                         ) {
-                          Text(
-                            text = "Directions",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
+                          Icon(
+                            painter = painterResource(id = R.drawable.ic_directions),
+                            contentDescription = "Directions to ${loc.label}",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
                           )
                         }
                         Box(
