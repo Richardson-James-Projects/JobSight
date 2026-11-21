@@ -89,21 +89,6 @@ Deno.serve(async (req: Request) => {
         await adminClient.from("search_sites").insert([
           {
             company_id: newCompanyId,
-            name: "SupplyHouse.com",
-            url_template: "https://www.supplyhouse.com/sh/control/search/~SEARCH_STRING={query}",
-          },
-          {
-            company_id: newCompanyId,
-            name: "Grainger",
-            url_template: "https://www.grainger.com/search?searchQuery={query}",
-          },
-          {
-            company_id: newCompanyId,
-            name: "RepairClinic",
-            url_template: "https://www.repairclinic.com/Shop-For-Parts?query={query}",
-          },
-          {
-            company_id: newCompanyId,
             name: "Google Search",
             url_template: "https://www.google.com/search?q={query}",
           },
