@@ -97,30 +97,18 @@ data class SearchSite(
     }
   }
 
+  val isPermanent: Boolean
+    get() = id <= 0L || name.equals("Google Search", ignoreCase = true) || urlTemplate.contains("google.com/search")
+
   companion object {
-    val DEFAULT_SITES =
-      listOf(
-        SearchSite(
-          id = -1L,
-          name = "SupplyHouse.com",
-          urlTemplate = "https://www.supplyhouse.com/sh/control/search/~SEARCH_STRING={query}",
-        ),
-        SearchSite(
-          id = -2L,
-          name = "Grainger",
-          urlTemplate = "https://www.grainger.com/search?searchQuery={query}",
-        ),
-        SearchSite(
-          id = -3L,
-          name = "RepairClinic",
-          urlTemplate = "https://www.repairclinic.com/Shop-For-Parts?query={query}",
-        ),
-        SearchSite(
-          id = -4L,
-          name = "Google Search",
-          urlTemplate = "https://www.google.com/search?q={query}",
-        ),
+    val GOOGLE_SEARCH =
+      SearchSite(
+        id = -100L,
+        name = "Google Search",
+        urlTemplate = "https://www.google.com/search?q={query}",
       )
+
+    val DEFAULT_SITES = listOf(GOOGLE_SEARCH)
   }
 }
 

@@ -727,40 +727,56 @@ class DefaultDataRepository(
       }
     }
 
+  private fun ensureGoogleSearchIncluded(sites: List<SearchSite>): List<SearchSite> {
+    val hasGoogle = sites.any { it.isPermanent }
+    return if (!hasGoogle) {
+      listOf(SearchSite.GOOGLE_SEARCH) + sites
+    } else {
+      sites
+    }
+  }
+
   override suspend fun getSearchSites(): List<SearchSite> =
     withContext(Dispatchers.IO) {
-      val request =
-        Request.Builder()
-          .url("$supabaseUrl/rest/v1/search_sites?select=id,name,url_template&order=id.asc")
-          .header("apikey", apiKey)
-          .header("Authorization", "Bearer ${authBearerToken()}")
-          .get()
-          .build()
+      val rawSites =
+        try {
+          val request =
+            Request.Builder()
+              .url("$supabaseUrl/rest/v1/search_sites?select=id,name,url_template&order=id.asc")
+              .header("apikey", apiKey)
+              .header("Authorization", "Bearer ${authBearerToken()}")
+              .get()
+              .build()
 
-      try {
-        httpClient.newCall(request).execute().use { response ->
-          val body = response.body?.string().orEmpty()
-          if (!response.isSuccessful) {
-            throw IOException("Failed to fetch search sites (${response.code}): $body")
+          httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+              throw IOException("Failed to fetch search sites (${response.code}): $body")
+            }
+            val list = json.decodeFromString<List<SearchSite>>(body)
+            try {
+              searchSitesCacheFile?.writeText(body)
+            } catch (_: Exception) {}
+            list
           }
-          val list = json.decodeFromString<List<SearchSite>>(body)
-          try {
-            searchSitesCacheFile?.writeText(body)
-          } catch (_: Exception) {}
-          list.ifEmpty { SearchSite.DEFAULT_SITES }
-        }
-      } catch (_: Exception) {
-        val cachedText =
-          try {
-            searchSitesCacheFile?.takeIf { it.exists() }?.readText()
-          } catch (_: Exception) {
-            null
+        } catch (_: Exception) {
+          val cachedText =
+            try {
+              searchSitesCacheFile?.takeIf { it.exists() }?.readText()
+            } catch (_: Exception) {
+              null
+            }
+          if (!cachedText.isNullOrBlank()) {
+            try {
+              json.decodeFromString<List<SearchSite>>(cachedText)
+            } catch (_: Exception) {
+              emptyList()
+            }
+          } else {
+            emptyList()
           }
-        if (!cachedText.isNullOrBlank()) {
-          return@withContext json.decodeFromString<List<SearchSite>>(cachedText)
         }
-        SearchSite.DEFAULT_SITES
-      }
+      ensureGoogleSearchIncluded(rawSites)
     }
 
   override suspend fun addSearchSite(name: String, urlTemplate: String): SearchSite =
@@ -804,6 +820,7 @@ class DefaultDataRepository(
 
   override suspend fun deleteSearchSite(siteId: Long) =
     withContext(Dispatchers.IO) {
+      if (siteId <= 0L) return@withContext
       val request =
         Request.Builder()
           .url("$supabaseUrl/rest/v1/search_sites?id=eq.$siteId")

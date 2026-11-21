@@ -2393,18 +2393,33 @@ private fun AppSettingsBottomSheet(
                     overflow = TextOverflow.Ellipsis,
                   )
                 }
-                OutlinedButton(
-                  onClick = { onDeleteSearchSite(site.id, site.name) },
-                  colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                  contentPadding = PaddingValues(0.dp),
-                  modifier = Modifier.size(32.dp),
-                ) {
-                  Icon(
-                    painter = painterResource(id = R.drawable.ic_close),
-                    contentDescription = "Delete Site",
-                    tint = Color(0xFFF87171),
-                    modifier = Modifier.size(16.dp),
-                  )
+                if (!site.isPermanent) {
+                  OutlinedButton(
+                    onClick = { onDeleteSearchSite(site.id, site.name) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.size(32.dp),
+                  ) {
+                    Icon(
+                      painter = painterResource(id = R.drawable.ic_close),
+                      contentDescription = "Delete Site",
+                      tint = Color(0xFFF87171),
+                      modifier = Modifier.size(16.dp),
+                    )
+                  }
+                } else {
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1E3A5F),
+                  ) {
+                    Text(
+                      text = "Default",
+                      color = Color(0xFF38BDF8),
+                      style = MaterialTheme.typography.labelSmall,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                  }
                 }
               }
             }

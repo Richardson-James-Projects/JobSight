@@ -280,6 +280,12 @@ class MainScreenViewModel(
   }
 
   fun deleteSearchSite(siteId: Long, siteName: String) {
+    if (siteId <= 0L || siteName.equals("Google Search", ignoreCase = true)) {
+      _uiState.update {
+        it.copy(statusBannerMessage = "'Google Search' is permanent and cannot be deleted.")
+      }
+      return
+    }
     viewModelScope.launch {
       try {
         dataRepository.deleteSearchSite(siteId)
